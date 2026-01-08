@@ -10,6 +10,8 @@ app = Flask(__name__)
 
 # 数据目录
 DATA_DIR = 'stock'
+# 股票列表文件
+STOCK_LIST_FILE = 'stock_list.csv'
 
 def aggregate_data(df, period='minute'):
     """
@@ -100,6 +102,45 @@ def find_stock_file(stock_code, year=None):
     
     return None, None
 
+def find_all_stock_files(stock_code, year=None):
+    """
+    查找所有年份的股票数据文件
+    stock_code: 股票代码，如 "000001.SZ" 或 "000001"
+    year: 年份，如果为None则查找所有年份
+    返回: [(文件路径, 年份), ...] 列表
+    """
+    # 标准化股票代码格式
+    if '.' not in stock_code:
+        filename_sz = f"{stock_code}.SZ.csv"
+        filename_sh = f"{stock_code}.SH.csv"
+    else:
+        filename_sz = f"{stock_code}.csv"
+        filename_sh = None
+    
+    files = []
+    
+    # 确定要查找的年份列表
+    if year:
+        years = [str(year)]
+    else:
+        # 查找所有年份目录，按升序排列（从早到晚）
+        years = sorted([d for d in os.listdir(DATA_DIR) 
+                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.isdigit()])
+    
+    # 遍历所有年份目录查找文件
+    for y in years:
+        year_dir = os.path.join(DATA_DIR, y)
+        if filename_sh:
+            file_path = os.path.join(year_dir, filename_sh)
+            if os.path.exists(file_path):
+                files.append((file_path, y))
+        
+        file_path = os.path.join(year_dir, filename_sz)
+        if os.path.exists(file_path):
+            files.append((file_path, y))
+    
+    return files
+
 
 def normalize_stock_code_with_market(stock_code):
     """
@@ -150,24 +191,36 @@ def get_stock_data(stock_code):
     if period not in ['minute', 'day', 'week', 'month']:
         period = 'minute'
     
-    # 查找文件
-    file_path, file_year = find_stock_file(stock_code, year)
+    # 查找所有年份的文件
+    files = find_all_stock_files(stock_code, year)
     
-    if not file_path:
+    if not files:
         return jsonify({
             'success': False,
             'error': f'未找到股票代码 {stock_code} 的数据'
         }), 404
     
     try:
-        # 读取CSV数据
-        df = pd.read_csv(file_path)
+        # 读取所有文件并合并数据
+        dfs = []
+        years_found = []
+        
+        for file_path, file_year in files:
+            df_year = pd.read_csv(file_path)
+            dfs.append(df_year)
+            years_found.append(file_year)
+        
+        # 合并所有数据
+        df = pd.concat(dfs, ignore_index=True)
         
         # 确保trade_time是datetime类型
         df['trade_time'] = pd.to_datetime(df['trade_time'])
         
         # 按时间排序
         df = df.sort_values('trade_time')
+        
+        # 去除重复数据（如果有）
+        df = df.drop_duplicates(subset=['trade_time'], keep='first')
         
         # 根据周期聚合数据
         df = aggregate_data(df, period)
@@ -179,7 +232,7 @@ def get_stock_data(stock_code):
         data = {
             'success': True,
             'stock_code': stock_code,
-            'year': file_year,
+            'year': ','.join(sorted(set(years_found))),  # 所有找到的年份
             'period': period,
             'data': df.to_dict('records'),
             'count': len(df)
@@ -208,13 +261,13 @@ def get_available_years():
 @app.route('/api/stock_info/<stock_code>')
 def get_stock_info(stock_code):
     """
-    通过东财接口获取股票基础信息（公司名称、总市值、PE、PS）
+    通过东财接口获取股票基础信息（公司名称、总市值、市盈率、市净率）
     """
     secid = normalize_stock_code_with_market(stock_code)
     url = 'https://push2.eastmoney.com/api/qt/stock/get'
     params = {
         'secid': secid,
-        'fields': 'f57,f58,f116,f162,f173'
+        'fields': 'f57,f58,f116,f162,f167'  # f167是市净率(PB)
     }
 
     try:
@@ -230,8 +283,8 @@ def get_stock_info(stock_code):
             'stock_code': data.get('f57') or stock_code,
             'name': data.get('f58'),
             'market_cap': data.get('f116'),  # 总市值（元）
-            'pe_ttm': data.get('f162'),
-            'ps_ttm': data.get('f173'),
+            'pe_ttm': data.get('f162'),  # 市盈率(PE)
+            'pb': data.get('f167'),  # 市净率(PB)
         }
         return jsonify(result)
     except Exception as e:
@@ -257,6 +310,60 @@ def get_stocks_by_year(year):
         'stocks': stocks,
         'count': len(stocks)
     })
+
+@app.route('/api/search_stocks')
+def search_stocks():
+    """
+    搜索股票代码和公司名称
+    参数:
+    - q: 搜索关键词（股票代码或公司名称）
+    - limit: 返回结果数量限制，默认10
+    """
+    query = request.args.get('q', '').strip()
+    limit = request.args.get('limit', 10, type=int)
+    
+    if not query:
+        return jsonify({
+            'success': True,
+            'results': [],
+            'count': 0
+        })
+    
+    try:
+        # 读取股票列表文件
+        if not os.path.exists(STOCK_LIST_FILE):
+            return jsonify({
+                'success': False,
+                'error': '股票列表文件不存在'
+            }), 404
+        
+        df = pd.read_csv(STOCK_LIST_FILE)
+        
+        # 搜索：匹配股票代码或公司名称
+        mask = (
+            df['code'].str.contains(query, case=False, na=False) |
+            df['name'].str.contains(query, case=False, na=False)
+        )
+        
+        results = df[mask].head(limit)
+        
+        # 转换为列表格式
+        stock_list = results.apply(lambda row: {
+            'code': row['code'],
+            'name': row['name']
+        }, axis=1).tolist()
+        
+        return jsonify({
+            'success': True,
+            'results': stock_list,
+            'count': len(stock_list)
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'搜索失败: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     # 支持通过环境变量或命令行参数指定端口

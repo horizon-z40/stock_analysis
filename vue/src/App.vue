@@ -3,13 +3,32 @@
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="search-section">
-        <input
-          v-model="stockCode"
-          @keyup.enter="loadStockData"
-          class="stock-input"
-          placeholder="输入股票代码，如：000001.SZ 或 000001"
-          type="text"
-        />
+        <div class="search-input-wrapper">
+          <input
+            v-model="searchQuery"
+            @input="handleSearchInput"
+            @keyup.enter="handleSearchEnter"
+            @focus="showSuggestions = true"
+            @blur="handleInputBlur"
+            class="stock-input"
+            placeholder="输入股票代码或公司名称，如：000001.SZ 或 平安银行"
+            type="text"
+            autocomplete="off"
+          />
+          <!-- 搜索建议下拉列表 -->
+          <div v-if="showSuggestions && searchSuggestions.length > 0" class="suggestions-dropdown">
+            <div
+              v-for="(item, index) in searchSuggestions"
+              :key="index"
+              @mousedown="selectStock(item)"
+              class="suggestion-item"
+              :class="{ 'highlighted': highlightedIndex === index }"
+            >
+              <span class="suggestion-code">{{ item.code }}</span>
+              <span class="suggestion-name">{{ item.name }}</span>
+            </div>
+          </div>
+        </div>
         <button @click="loadStockData" class="search-btn">查询</button>
       </div>
       
@@ -42,12 +61,12 @@
         <span class="info-value">{{ formatBillion(stockBasics?.market_cap) }}</span>
       </div>
       <div class="info-block">
-        <span class="info-label">PE(TTM)</span>
+        <span class="info-label">市盈率</span>
         <span class="info-value">{{ formatNumber(stockBasics?.pe_ttm) }}</span>
       </div>
       <div class="info-block">
-        <span class="info-label">PS(TTM)</span>
-        <span class="info-value">{{ formatNumber(stockBasics?.ps_ttm) }}</span>
+        <span class="info-label">市净率</span>
+        <span class="info-value">{{ formatNumber(stockBasics?.pb) }}</span>
       </div>
       <div class="info-block">
         <span class="info-label">数据量</span>
@@ -71,7 +90,8 @@ import * as echarts from 'echarts'
 import axios from 'axios'
 
 const stockCode = ref('000001.SZ')
-const currentPeriod = ref('minute')
+const searchQuery = ref('000001.SZ')
+const currentPeriod = ref('day')
 const loading = ref(false)
 const error = ref('')
 const chartRef = ref(null)
@@ -79,6 +99,12 @@ let chartInstance = null
 
 const stockInfo = ref(null)
 const stockBasics = ref(null)
+
+// 搜索建议相关
+const searchSuggestions = ref([])
+const showSuggestions = ref(false)
+const highlightedIndex = ref(-1)
+let searchTimeout = null
 
 const periods = [
   { label: '分钟', value: 'minute' },
@@ -119,6 +145,75 @@ const initChart = async () => {
   }
 }
 
+// 搜索股票
+const searchStocks = async (query) => {
+  if (!query || query.trim().length < 1) {
+    searchSuggestions.value = []
+    return
+  }
+  
+  try {
+    const response = await axios.get('/api/search_stocks', {
+      params: {
+        q: query.trim(),
+        limit: 10
+      }
+    })
+    
+    if (response.data.success) {
+      searchSuggestions.value = response.data.results || []
+    } else {
+      searchSuggestions.value = []
+    }
+  } catch (err) {
+    console.error('搜索股票失败:', err)
+    searchSuggestions.value = []
+  }
+}
+
+// 处理搜索输入
+const handleSearchInput = () => {
+  // 清除之前的定时器
+  if (searchTimeout) {
+    clearTimeout(searchTimeout)
+  }
+  
+  // 防抖：300ms后执行搜索
+  searchTimeout = setTimeout(() => {
+    searchStocks(searchQuery.value)
+  }, 300)
+}
+
+// 处理输入框失焦
+const handleInputBlur = () => {
+  // 延迟隐藏，以便点击选项时能触发
+  setTimeout(() => {
+    showSuggestions.value = false
+  }, 200)
+}
+
+// 选择股票
+const selectStock = (item) => {
+  stockCode.value = item.code
+  searchQuery.value = item.code
+  searchSuggestions.value = []
+  showSuggestions.value = false
+  loadStockData()
+}
+
+// 处理回车键
+const handleSearchEnter = () => {
+  if (highlightedIndex.value >= 0 && searchSuggestions.value[highlightedIndex.value]) {
+    // 如果有高亮的选项，选择它
+    selectStock(searchSuggestions.value[highlightedIndex.value])
+  } else if (searchQuery.value.trim()) {
+    // 否则直接使用输入的内容作为股票代码
+    stockCode.value = searchQuery.value.trim()
+    showSuggestions.value = false
+    loadStockData()
+  }
+}
+
 // 选择周期
 const selectPeriod = (period) => {
   currentPeriod.value = period
@@ -129,6 +224,11 @@ const selectPeriod = (period) => {
 
 // 加载股票数据
 const loadStockData = async () => {
+  // 如果stockCode有值但searchQuery为空，同步searchQuery
+  if (stockCode.value && !searchQuery.value) {
+    searchQuery.value = stockCode.value
+  }
+  
   if (!stockCode.value.trim()) {
     error.value = '请输入股票代码'
     loading.value = false
@@ -196,7 +296,7 @@ const fetchStockInfo = async (code) => {
         name: resp.data.name,
         market_cap: resp.data.market_cap,
         pe_ttm: resp.data.pe_ttm,
-        ps_ttm: resp.data.ps_ttm
+        pb: resp.data.pb
       }
     } else {
       stockBasics.value = null
@@ -509,6 +609,10 @@ onMounted(async () => {
   align-items: center;
 }
 
+.search-input-wrapper {
+  position: relative;
+}
+
 .stock-input {
   padding: 8px 15px;
   background: #1a1a1a;
@@ -516,13 +620,58 @@ onMounted(async () => {
   border-radius: 4px;
   color: #e0e0e0;
   font-size: 14px;
-  width: 250px;
+  width: 300px;
   outline: none;
   transition: border-color 0.3s;
 }
 
 .stock-input:focus {
   border-color: #2196f3;
+}
+
+.suggestions-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.suggestion-item {
+  padding: 10px 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: background 0.2s;
+  border-bottom: 1px solid #333;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover,
+.suggestion-item.highlighted {
+  background: #333;
+}
+
+.suggestion-code {
+  color: #2196f3;
+  font-weight: 500;
+  font-family: 'Courier New', monospace;
+}
+
+.suggestion-name {
+  color: #e0e0e0;
+  font-size: 13px;
 }
 
 .search-btn {

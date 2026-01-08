@@ -104,6 +104,7 @@ GET /api/stocks/<year>
 ```
 股票回测/
 ├── app.py                 # Flask后端应用
+├── fetch_stock_list.py    # 获取A股股票代码列表脚本
 ├── requirements.txt       # Python依赖
 ├── README.md             # 项目说明
 ├── stock/                # 股票数据目录
@@ -118,9 +119,64 @@ GET /api/stocks/<year>
         └── main.js
 ```
 
+## 获取股票代码列表
+
+项目提供了一个脚本用于获取A股所有公司的股票代码和公司名称对应关系：
+
+```bash
+python3 fetch_stock_list.py
+```
+
+脚本会生成两个文件：
+- `stock_list.json`: JSON格式，包含完整的股票信息
+- `stock_list.csv`: CSV格式，便于查看和编辑
+
+### 脚本功能
+
+- 支持两种数据源：
+  - **akshare**（推荐）：免费Python库，数据稳定
+  - **东方财富API**：备用数据源
+- 自动添加市场后缀（.SH 或 .SZ）
+- 自动去重
+- 支持自定义输出文件名
+
+### 使用示例
+
+```bash
+# 使用默认文件名
+python3 fetch_stock_list.py
+
+# 指定输出文件名
+python3 fetch_stock_list.py my_stock_list.json
+```
+
+### 输出格式
+
+**JSON格式** (`stock_list.json`):
+```json
+{
+  "update_time": "2025-01-XX XX:XX:XX",
+  "total": 5000,
+  "stocks": [
+    {"code": "000001.SZ", "name": "平安银行"},
+    {"code": "000002.SZ", "name": "万科A"},
+    ...
+  ]
+}
+```
+
+**CSV格式** (`stock_list.csv`):
+```csv
+code,name
+000001.SZ,平安银行
+000002.SZ,万科A
+...
+```
+
 ## 注意事项
 
 - 确保 `stock` 目录下有对应年份的数据文件
 - 股票代码格式支持：`000001.SZ`、`000001.SH` 或 `000001`（自动识别）
 - 数据文件必须是CSV格式，包含必需的7列数据
+- 获取股票列表需要网络连接，建议定期更新股票列表
 

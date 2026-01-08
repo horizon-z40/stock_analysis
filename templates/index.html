@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票策略回测系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <header class="header">
+                <h1>股票策略回测系统</h1>
+                <div class="search-box">
+                    <input 
+                        type="text" 
+                        v-model="stockCode"
+                        @keypress.enter="searchStock"
+                        placeholder="输入股票代码，如：000001.SZ 或 000001，按回车查询"
+                        autocomplete="off"
+                    >
+                    <select v-model="selectedYear">
+                        <option value="">最新年份</option>
+                        <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
+                    </select>
+                    <select v-model="selectedPeriod">
+                        <option value="minute">分钟</option>
+                        <option value="day">日</option>
+                        <option value="week">周</option>
+                        <option value="month">月</option>
+                    </select>
+                    <button @click="searchStock">查询</button>
+                </div>
+            </header>
+
+            <div class="content">
+                <div class="stock-info" v-if="stockInfo.show">
+                    <h2>股票代码: {{ stockInfo.code }}</h2>
+                    <p>数据年份: {{ stockInfo.year }}</p>
+                    <p>时间周期: {{ stockInfo.period }}</p>
+                    <p>数据条数: {{ stockInfo.count }}</p>
+                </div>
+
+                <div class="chart-container">
+                    <div ref="klineChartRef" class="chart"></div>
+                </div>
+
+                <div class="chart-container">
+                    <div ref="volumeChartRef" class="chart"></div>
+                </div>
+            </div>
+
+            <div class="loading" v-if="loading">
+                <div class="spinner"></div>
+                <p>加载中...</p>
+            </div>
+
+            <div class="error" v-if="error" @click="error = ''">
+                {{ error }}
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

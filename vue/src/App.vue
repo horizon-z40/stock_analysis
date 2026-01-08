@@ -11,7 +11,7 @@
             @focus="showSuggestions = true"
             @blur="handleInputBlur"
             class="stock-input"
-            placeholder="输入股票代码或公司名称，如：000001.SZ 或 平安银行"
+            placeholder="输入股票代码、公司名称或拼音，如：000001.SZ、平安银行、pinganyinhang、PAYH"
             type="text"
             autocomplete="off"
           />

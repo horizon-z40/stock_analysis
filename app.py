@@ -5,6 +5,7 @@ from datetime import datetime
 import glob
 import sys
 import requests
+from pypinyin import lazy_pinyin, Style
 
 app = Flask(__name__)
 
@@ -311,12 +312,28 @@ def get_stocks_by_year(year):
         'count': len(stocks)
     })
 
+def get_pinyin(text):
+    """
+    获取中文文本的拼音（不带声调）
+    """
+    if not text or pd.isna(text):
+        return ''
+    return ''.join(lazy_pinyin(str(text), style=Style.NORMAL))
+
+def get_pinyin_initial(text):
+    """
+    获取中文文本的拼音首字母
+    """
+    if not text or pd.isna(text):
+        return ''
+    return ''.join([p[0].upper() for p in lazy_pinyin(str(text), style=Style.FIRST_LETTER)])
+
 @app.route('/api/search_stocks')
 def search_stocks():
     """
-    搜索股票代码和公司名称
+    搜索股票代码和公司名称（支持拼音搜索）
     参数:
-    - q: 搜索关键词（股票代码或公司名称）
+    - q: 搜索关键词（股票代码、公司名称或拼音）
     - limit: 返回结果数量限制，默认10
     """
     query = request.args.get('q', '').strip()
@@ -339,13 +356,39 @@ def search_stocks():
         
         df = pd.read_csv(STOCK_LIST_FILE)
         
-        # 搜索：匹配股票代码或公司名称
-        mask = (
-            df['code'].str.contains(query, case=False, na=False) |
-            df['name'].str.contains(query, case=False, na=False)
-        )
+        # 将查询词转换为小写（用于拼音匹配），并去除空格
+        query_lower = query.lower().replace(' ', '')
+        query_upper = query.upper().replace(' ', '')
+        query_no_space = query.replace(' ', '')
         
-        results = df[mask].head(limit)
+        # 基础匹配：股票代码和中文名称（忽略名称中的空格）
+        code_mask = df['code'].astype(str).str.contains(query, case=False, na=False)
+        # 匹配时去除公司名称中的空格
+        name_mask = df['name'].astype(str).str.replace(' ', '', regex=False).str.contains(query_no_space, case=False, na=False)
+        
+        # 如果基础匹配已有结果，直接返回（性能优化）
+        basic_mask = code_mask | name_mask
+        if basic_mask.sum() >= limit:
+            results = df[basic_mask].head(limit)
+        else:
+            # 需要拼音匹配，计算所有名称的拼音
+            # 为了提高性能，只对未匹配的行计算拼音
+            unmatched_df = df[~basic_mask].copy()
+            
+            if len(unmatched_df) > 0:
+                # 计算拼音全拼和首字母（去除空格）
+                unmatched_df['_pinyin'] = unmatched_df['name'].apply(lambda x: get_pinyin(str(x)).lower().replace(' ', ''))
+                unmatched_df['_pinyin_initials'] = unmatched_df['name'].apply(lambda x: get_pinyin_initial(str(x)).replace(' ', ''))
+                
+                # 拼音匹配（查询词已去除空格）
+                pinyin_mask = unmatched_df['_pinyin'].str.contains(query_lower, na=False)
+                initials_mask = unmatched_df['_pinyin_initials'].str.contains(query_upper, na=False)
+                
+                # 合并所有匹配结果
+                pinyin_matched = unmatched_df[pinyin_mask | initials_mask].drop(columns=['_pinyin', '_pinyin_initials'], errors='ignore')
+                results = pd.concat([df[basic_mask], pinyin_matched]).head(limit)
+            else:
+                results = df[basic_mask].head(limit)
         
         # 转换为列表格式
         stock_list = results.apply(lambda row: {

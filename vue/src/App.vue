@@ -46,15 +46,11 @@
     <div class="info-section" v-if="stockInfo">
       <div class="info-block">
         <span class="info-label">代码</span>
-        <span class="info-value code">{{ stockInfo.stock_code }}</span>
+        <span class="info-value code clickable" @click="openFutunnStock(stockInfo.stock_code)" :title="'点击查看 ' + stockInfo.stock_code + ' 在富途的详情'">{{ stockInfo.stock_code }}</span>
       </div>
       <div class="info-block">
         <span class="info-label">名称</span>
         <span class="info-value">{{ stockBasics?.name || '-' }}</span>
-      </div>
-      <div class="info-block">
-        <span class="info-label">年份</span>
-        <span class="info-value">{{ stockInfo.year }}</span>
       </div>
       <div class="info-block">
         <span class="info-label">总市值</span>
@@ -577,6 +573,30 @@ const formatNumber = (val, digits = 2) => {
   return num.toFixed(digits)
 }
 
+// 跳转到富途股票页面
+const openFutunnStock = (stockCode) => {
+  if (!stockCode) return
+  
+  // 富途的URL格式：将 .SZ 转换为 -SZ，.SH 转换为 -SH
+  // 例如：000001.SZ -> 000001-SZ, 600000.SH -> 600000-SH
+  let futunnCode = stockCode
+  
+  // 如果包含点号，转换为连字符格式
+  if (futunnCode.includes('.')) {
+    futunnCode = futunnCode.replace(/\.SZ$/i, '-SZ').replace(/\.SH$/i, '-SH')
+  } else {
+    // 如果代码中没有市场后缀，根据代码判断市场（6开头是沪市，其他是深市）
+    if (/^6\d{5}$/.test(futunnCode)) {
+      futunnCode = futunnCode + '-SH'
+    } else if (/^\d{6}$/.test(futunnCode)) {
+      futunnCode = futunnCode + '-SZ'
+    }
+  }
+  
+  const url = `https://www.futunn.com/stock/${futunnCode}`
+  window.open(url, '_blank')
+}
+
 onMounted(async () => {
   await initChart()
   // 默认加载000001.SZ的数据
@@ -745,6 +765,18 @@ onMounted(async () => {
 
 .info-value.code {
   color: #2196f3;
+}
+
+.info-value.code.clickable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(33, 150, 243, 0.5);
+  transition: all 0.2s;
+}
+
+.info-value.code.clickable:hover {
+  color: #42a5f5;
+  text-decoration-color: #42a5f5;
 }
 
 .chart-container {

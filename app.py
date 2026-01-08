@@ -279,13 +279,17 @@ def get_stock_info(stock_code):
         if not data:
             return jsonify({'success': False, 'error': '未获取到基础信息'}), 404
 
+        # 东财接口返回的市盈率和市净率需要除以100
+        pe_ttm = data.get('f162')
+        pb = data.get('f167')
+        
         result = {
             'success': True,
             'stock_code': data.get('f57') or stock_code,
             'name': data.get('f58'),
             'market_cap': data.get('f116'),  # 总市值（元）
-            'pe_ttm': data.get('f162'),  # 市盈率(PE)
-            'pb': data.get('f167'),  # 市净率(PB)
+            'pe_ttm': pe_ttm / 100.0 if pe_ttm is not None else None,  # 市盈率(PE)，需要除以100
+            'pb': pb / 100.0 if pb is not None else None,  # 市净率(PB)，需要除以100
         }
         return jsonify(result)
     except Exception as e:

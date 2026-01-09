@@ -1,5 +1,29 @@
 <template>
   <div class="app-container">
+    <!-- 左侧自选窗口 -->
+    <div class="favorites-sidebar">
+      <div class="favorites-header">
+        <h3>自选</h3>
+        <span class="favorites-count">({{ favoriteStocks.length }})</span>
+      </div>
+      <div class="favorites-list">
+        <div
+          v-for="stock in favoriteStocks"
+          :key="stock.code"
+          class="favorite-item"
+          @click="selectFavoriteStock(stock.code)"
+        >
+          <span class="favorite-code">{{ stock.code }}</span>
+          <span class="favorite-name">{{ stock.name || '-' }}</span>
+        </div>
+        <div v-if="favoriteStocks.length === 0" class="favorites-empty">
+          暂无自选股票
+        </div>
+      </div>
+    </div>
+    
+    <!-- 主内容区 -->
+    <div class="main-content">
     <!-- 顶部工具栏 -->
     <div class="toolbar">
       <div class="search-section">
@@ -44,6 +68,19 @@
       </div>
       
     <div class="info-section" v-if="stockInfo">
+      <!-- 桃心图标 -->
+      <div class="favorite-heart" @click="toggleFavorite" :title="isFavorite ? '取消自选' : '加入自选'">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path
+            d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+            :fill="isFavorite ? '#ff4757' : '#666'"
+            :stroke="isFavorite ? '#ff4757' : '#666'"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
+      
       <div class="info-block">
         <span class="info-label">代码</span>
         <span class="info-value code clickable" @click="openFutunnStock(stockInfo.stock_code)" :title="'点击查看 ' + stockInfo.stock_code + ' 在富途的详情'">{{ stockInfo.stock_code }}</span>
@@ -77,6 +114,7 @@
       <div v-else-if="error" class="error">{{ error }}</div>
       <div v-show="!loading && !error" ref="chartRef" class="chart"></div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -95,6 +133,8 @@ let chartInstance = null
 
 const stockInfo = ref(null)
 const stockBasics = ref(null)
+const isFavorite = ref(false)
+const favoriteStocks = ref([])
 
 // 搜索建议相关
 const searchSuggestions = ref([])
@@ -264,6 +304,7 @@ const loadStockData = async () => {
       await nextTick() // 等待DOM更新
       renderChart(response.data.data)
       fetchStockInfo(stockCode.value) // 异步获取公司基本面
+      checkFavoriteStatus(stockCode.value) // 检查自选状态
     } else {
       error.value = response.data.error || '加载失败'
       loading.value = false
@@ -573,6 +614,77 @@ const formatNumber = (val, digits = 2) => {
   return num.toFixed(digits)
 }
 
+// 加载自选股票列表
+const loadFavoriteStocks = async () => {
+  try {
+    const response = await axios.get('/api/favorites', { timeout: 5000 })
+    if (response.data?.success) {
+      favoriteStocks.value = response.data.stocks || []
+    }
+  } catch (e) {
+    console.warn('加载自选股票失败', e)
+    favoriteStocks.value = []
+  }
+}
+
+// 检查股票是否为自选
+const checkFavoriteStatus = async (code) => {
+  if (!code) {
+    isFavorite.value = false
+    return
+  }
+  try {
+    const response = await axios.get('/api/favorites/check', {
+      params: { stock_code: code },
+      timeout: 5000
+    })
+    if (response.data?.success) {
+      isFavorite.value = response.data.is_favorite || false
+    }
+  } catch (e) {
+    console.warn('检查自选状态失败', e)
+    isFavorite.value = false
+  }
+}
+
+// 切换自选状态
+const toggleFavorite = async () => {
+  if (!stockInfo.value?.stock_code) return
+  
+  const code = stockInfo.value.stock_code
+  const name = stockBasics.value?.name || ''
+  
+  try {
+    if (isFavorite.value) {
+      // 取消自选
+      await axios.delete('/api/favorites', {
+        params: { stock_code: code },
+        timeout: 5000
+      })
+      isFavorite.value = false
+    } else {
+      // 添加自选
+      await axios.post('/api/favorites', {
+        stock_code: code,
+        stock_name: name
+      }, { timeout: 5000 })
+      isFavorite.value = true
+    }
+    // 重新加载自选列表
+    await loadFavoriteStocks()
+  } catch (e) {
+    console.error('切换自选状态失败', e)
+    alert('操作失败，请稍后重试')
+  }
+}
+
+// 选择自选股票
+const selectFavoriteStock = (code) => {
+  stockCode.value = code
+  searchQuery.value = code
+  loadStockData()
+}
+
 // 跳转到富途股票页面
 const openFutunnStock = (stockCode) => {
   if (!stockCode) return
@@ -599,6 +711,8 @@ const openFutunnStock = (stockCode) => {
 
 onMounted(async () => {
   await initChart()
+  // 加载自选股票列表
+  await loadFavoriteStocks()
   // 默认加载000001.SZ的数据
   await loadStockData()
 })
@@ -607,10 +721,88 @@ onMounted(async () => {
 <style scoped>
 .app-container {
   width: 100%;
-  height: 100%;
+  height: 100vh;
+  display: flex;
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+.favorites-sidebar {
+  width: 250px;
+  background: #1a1a1a;
+  border-right: 1px solid #333;
   display: flex;
   flex-direction: column;
-  background: #1a1a1a;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.favorites-header {
+  padding: 16px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.favorites-header h3 {
+  margin: 0;
+  color: #e0e0e0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.favorites-count {
+  color: #777;
+  font-size: 14px;
+}
+
+.favorites-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.favorite-item {
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  background: #252525;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.favorite-item:hover {
+  background: #333;
+}
+
+.favorite-code {
+  color: #2196f3;
+  font-weight: 600;
+  font-size: 14px;
+  font-family: 'Courier New', monospace;
+}
+
+.favorite-name {
+  color: #999;
+  font-size: 12px;
+}
+
+.favorites-empty {
+  padding: 20px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .toolbar {
@@ -777,6 +969,42 @@ onMounted(async () => {
 .info-value.code.clickable:hover {
   color: #42a5f5;
   text-decoration-color: #42a5f5;
+}
+
+.favorite-heart {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  transition: transform 0.2s;
+  margin-right: 8px;
+}
+
+.favorite-heart:hover {
+  transform: scale(1.1);
+}
+
+.favorite-heart svg {
+  transition: all 0.2s;
+}
+
+.favorite-heart {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  transition: transform 0.2s;
+  margin-right: 8px;
+}
+
+.favorite-heart:hover {
+  transform: scale(1.1);
+}
+
+.favorite-heart svg {
+  transition: all 0.2s;
 }
 
 .chart-container {

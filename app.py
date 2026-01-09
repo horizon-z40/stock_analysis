@@ -5,6 +5,7 @@ from datetime import datetime
 import glob
 import sys
 import requests
+import json
 from pypinyin import lazy_pinyin, Style
 
 app = Flask(__name__)
@@ -13,6 +14,8 @@ app = Flask(__name__)
 DATA_DIR = 'stock'
 # 股票列表文件
 STOCK_LIST_FILE = 'stock_list.csv'
+# 自选股票文件
+FAVORITE_STOCKS_FILE = 'favorite_stocks.json'
 
 def aggregate_data(df, period='minute'):
     """
@@ -410,6 +413,146 @@ def search_stocks():
         return jsonify({
             'success': False,
             'error': f'搜索失败: {str(e)}'
+        }), 500
+
+def load_favorite_stocks():
+    """加载自选股票列表"""
+    if os.path.exists(FAVORITE_STOCKS_FILE):
+        try:
+            with open(FAVORITE_STOCKS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_favorite_stocks(stocks):
+    """保存自选股票列表"""
+    try:
+        with open(FAVORITE_STOCKS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(stocks, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"保存自选股票失败: {e}")
+        return False
+
+@app.route('/api/favorites', methods=['GET'])
+def get_favorites():
+    """获取所有自选股票"""
+    try:
+        stocks = load_favorite_stocks()
+        return jsonify({
+            'success': True,
+            'stocks': stocks
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'获取自选股票失败: {str(e)}'
+        }), 500
+
+@app.route('/api/favorites', methods=['POST'])
+def add_favorite():
+    """添加自选股票"""
+    try:
+        data = request.get_json()
+        stock_code = data.get('stock_code')
+        stock_name = data.get('stock_name', '')
+        
+        if not stock_code:
+            return jsonify({
+                'success': False,
+                'error': '股票代码不能为空'
+            }), 400
+        
+        stocks = load_favorite_stocks()
+        
+        # 检查是否已存在
+        if any(s.get('code') == stock_code for s in stocks):
+            return jsonify({
+                'success': False,
+                'error': '该股票已在自选列表中'
+            }), 400
+        
+        # 添加新股票
+        stocks.append({
+            'code': stock_code,
+            'name': stock_name,
+            'added_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+        
+        if save_favorite_stocks(stocks):
+            return jsonify({
+                'success': True,
+                'message': '添加成功'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '保存失败'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'添加自选股票失败: {str(e)}'
+        }), 500
+
+@app.route('/api/favorites', methods=['DELETE'])
+def remove_favorite():
+    """删除自选股票"""
+    try:
+        stock_code = request.args.get('stock_code')
+        
+        if not stock_code:
+            return jsonify({
+                'success': False,
+                'error': '股票代码不能为空'
+            }), 400
+        
+        stocks = load_favorite_stocks()
+        stocks = [s for s in stocks if s.get('code') != stock_code]
+        
+        if save_favorite_stocks(stocks):
+            return jsonify({
+                'success': True,
+                'message': '删除成功'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': '保存失败'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'删除自选股票失败: {str(e)}'
+        }), 500
+
+@app.route('/api/favorites/check', methods=['GET'])
+def check_favorite():
+    """检查股票是否在自选列表中"""
+    try:
+        stock_code = request.args.get('stock_code')
+        
+        if not stock_code:
+            return jsonify({
+                'success': False,
+                'is_favorite': False
+            })
+        
+        stocks = load_favorite_stocks()
+        is_favorite = any(s.get('code') == stock_code for s in stocks)
+        
+        return jsonify({
+            'success': True,
+            'is_favorite': is_favorite
+        })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'检查失败: {str(e)}'
         }), 500
 
 if __name__ == '__main__':

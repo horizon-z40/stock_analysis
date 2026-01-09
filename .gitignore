@@ -3,3 +3,6 @@ stock/
 # 启动脚本生成的临时文件
 .server.pid
 .server.log
+
+# 自选股票文件
+favorite_stocks.json

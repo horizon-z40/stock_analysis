@@ -11,34 +11,24 @@ from pypinyin import lazy_pinyin, Style
 app = Flask(__name__)
 
 # 数据目录
-DATA_DIR = 'stock'
+DATA_DIR = 'data'
 # 股票列表文件
 STOCK_LIST_FILE = 'stock_list.csv'
 # 自选股票文件
 FAVORITE_STOCKS_FILE = 'favorite_stocks.json'
 
-def aggregate_data(df, period='minute'):
+def aggregate_data(df, period='day'):
     """
-    将分钟级数据聚合为不同周期
-    period: 'minute', 'day', 'week', 'month'
+    将日级数据聚合为不同周期
+    period: 'day', 'week', 'month'
     """
-    if period == 'minute':
+    if period == 'day':
         return df.copy()
     
     # 设置trade_time为索引
     df_indexed = df.set_index('trade_time')
     
-    if period == 'day':
-        # 按日聚合
-        aggregated = df_indexed.resample('D').agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'vol': 'sum',
-            'amount': 'sum'
-        })
-    elif period == 'week':
+    if period == 'week':
         # 按周聚合（周一到周日）
         aggregated = df_indexed.resample('W').agg({
             'open': 'first',
@@ -85,16 +75,17 @@ def find_stock_file(stock_code, year=None):
     
     # 如果指定了年份，只在该年份目录查找
     if year:
-        years = [str(year)]
+        years = [f"{year}_by_day"]
     else:
-        # 查找所有年份目录，按降序排列
+        # 查找所有日级年份目录，按降序排列
         years = sorted([d for d in os.listdir(DATA_DIR) 
-                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.isdigit()], 
+                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.endswith('_by_day')], 
                       reverse=True)
     
     # 遍历年份目录查找文件
-    for y in years:
-        year_dir = os.path.join(DATA_DIR, y)
+    for y_dir in years:
+        year_dir = os.path.join(DATA_DIR, y_dir)
+        y = y_dir.replace('_by_day', '') # 提取纯年份
         if filename_sh:
             file_path = os.path.join(year_dir, filename_sh)
             if os.path.exists(file_path):
@@ -125,15 +116,16 @@ def find_all_stock_files(stock_code, year=None):
     
     # 确定要查找的年份列表
     if year:
-        years = [str(year)]
+        years = [f"{year}_by_day"]
     else:
-        # 查找所有年份目录，按升序排列（从早到晚）
+        # 查找所有日级年份目录，按升序排列（从早到晚）
         years = sorted([d for d in os.listdir(DATA_DIR) 
-                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.isdigit()])
+                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.endswith('_by_day')])
     
     # 遍历所有年份目录查找文件
-    for y in years:
-        year_dir = os.path.join(DATA_DIR, y)
+    for y_dir in years:
+        year_dir = os.path.join(DATA_DIR, y_dir)
+        y = y_dir.replace('_by_day', '') # 提取纯年份
         if filename_sh:
             file_path = os.path.join(year_dir, filename_sh)
             if os.path.exists(file_path):
@@ -182,7 +174,7 @@ def get_stock_data(stock_code):
     参数:
     - stock_code: 股票代码，如 "000001.SZ" 或 "000001"
     - year: 可选，年份，如 "2025"
-    - period: 可选，时间周期，如 "minute", "day", "week", "month"，默认为 "minute"
+    - period: 可选，时间周期，如 "day", "week", "month"，默认为 "day"
     """
     year = request.args.get('year', None)
     if year:
@@ -191,9 +183,9 @@ def get_stock_data(stock_code):
         except:
             year = None
     
-    period = request.args.get('period', 'minute')
-    if period not in ['minute', 'day', 'week', 'month']:
-        period = 'minute'
+    period = request.args.get('period', 'day')
+    if period not in ['day', 'week', 'month']:
+        period = 'day'
     
     # 查找所有年份的文件
     files = find_all_stock_files(stock_code, year)
@@ -271,7 +263,7 @@ def get_stock_info(stock_code):
     url = 'https://push2.eastmoney.com/api/qt/stock/get'
     params = {
         'secid': secid,
-        'fields': 'f57,f58,f116,f162,f167'  # f167是市净率(PB)
+        'fields': 'f43,f57,f58,f116,f162,f163,f167'  # f43最新价, f162市盈率(TTM), f163市盈率(静), f167是市净率(PB)
     }
 
     try:
@@ -282,17 +274,37 @@ def get_stock_info(stock_code):
         if not data:
             return jsonify({'success': False, 'error': '未获取到基础信息'}), 404
 
-        # 东财接口返回的市盈率和市净率需要除以100
-        pe_ttm = data.get('f162')
-        pb = data.get('f167')
+        # 东财接口返回的价格、市盈率和市净率通常需要除以100
+        def safe_div_100(val):
+            if val is None or val == '-' or val == '':
+                return None
+            try:
+                # 尝试转换为浮点数
+                f_val = float(val)
+                # 如果值是 0 或非常接近 0，且原始数据是 '-'，返回 None
+                if f_val == 0 and val == '-':
+                    return None
+                return f_val / 100.0
+            except (ValueError, TypeError):
+                return None
+
+        def safe_float(val):
+            if val is None or val == '-':
+                return None
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return None
         
         result = {
             'success': True,
             'stock_code': data.get('f57') or stock_code,
             'name': data.get('f58'),
-            'market_cap': data.get('f116'),  # 总市值（元）
-            'pe_ttm': pe_ttm / 100.0 if pe_ttm is not None else None,  # 市盈率(PE)，需要除以100
-            'pb': pb / 100.0 if pb is not None else None,  # 市净率(PB)，需要除以100
+            'price': safe_div_100(data.get('f43')),
+            'market_cap': safe_float(data.get('f116')),  # 总市值（元）
+            'pe_ttm': safe_div_100(data.get('f162')),
+            'pe_static': safe_div_100(data.get('f163')),
+            'pb': safe_div_100(data.get('f167')),
         }
         return jsonify(result)
     except Exception as e:
@@ -334,6 +346,54 @@ def get_pinyin_initial(text):
     if not text or pd.isna(text):
         return ''
     return ''.join([p[0].upper() for p in lazy_pinyin(str(text), style=Style.FIRST_LETTER)])
+
+STOCK_LIST_PINYIN_CACHE = {
+    'mtime': None,
+    'stocks': None
+}
+
+def load_stock_list_with_pinyin():
+    """
+    加载股票列表并缓存拼音字段，避免重复计算
+    """
+    if not os.path.exists(STOCK_LIST_FILE):
+        return []
+    mtime = os.path.getmtime(STOCK_LIST_FILE)
+    if STOCK_LIST_PINYIN_CACHE['stocks'] is not None and STOCK_LIST_PINYIN_CACHE['mtime'] == mtime:
+        return STOCK_LIST_PINYIN_CACHE['stocks']
+
+    df = pd.read_csv(STOCK_LIST_FILE)
+    df['name'] = df['name'].astype(str)
+    df['pinyin'] = df['name'].apply(lambda x: get_pinyin(x).lower().replace(' ', ''))
+    df['pinyin_initials'] = df['name'].apply(lambda x: get_pinyin_initial(x).replace(' ', ''))
+    stocks = df.apply(lambda row: {
+        'code': row['code'],
+        'name': row['name'],
+        'pinyin': row['pinyin'],
+        'pinyin_initials': row['pinyin_initials']
+    }, axis=1).tolist()
+
+    STOCK_LIST_PINYIN_CACHE['stocks'] = stocks
+    STOCK_LIST_PINYIN_CACHE['mtime'] = mtime
+    return stocks
+
+@app.route('/api/stock_list')
+def get_stock_list():
+    """
+    获取股票列表（包含拼音字段，供前端联想搜索）
+    """
+    try:
+        stocks = load_stock_list_with_pinyin()
+        return jsonify({
+            'success': True,
+            'results': stocks,
+            'count': len(stocks)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'获取股票列表失败: {str(e)}'
+        }), 500
 
 @app.route('/api/search_stocks')
 def search_stocks():
@@ -569,4 +629,3 @@ if __name__ == '__main__':
     print(f"服务器启动在 http://localhost:{port}")
     print(f"请在浏览器中访问: http://localhost:{port}")
     app.run(debug=True, host='0.0.0.0', port=port)
-

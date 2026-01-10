@@ -25,93 +25,106 @@
     <div class="main-content">
     <!-- 顶部工具栏 -->
     <div class="toolbar">
-      <div class="search-section">
-        <div class="search-input-wrapper">
-          <input
-            v-model="searchQuery"
-            @input="handleSearchInput"
-            @keyup.enter="handleSearchEnter"
-            @focus="showSuggestions = true"
-            @blur="handleInputBlur"
-            class="stock-input"
-            placeholder="输入股票代码、公司名称或拼音，如：000001.SZ、平安银行、pinganyinhang、PAYH"
-            type="text"
-            autocomplete="off"
-          />
-          <!-- 搜索建议下拉列表 -->
-          <div v-if="showSuggestions && searchSuggestions.length > 0" class="suggestions-dropdown">
-            <div
-              v-for="(item, index) in searchSuggestions"
-              :key="index"
-              @mousedown="selectStock(item)"
-              class="suggestion-item"
-              :class="{ 'highlighted': highlightedIndex === index }"
-            >
-              <span class="suggestion-code">{{ item.code }}</span>
-              <span class="suggestion-name">{{ item.name }}</span>
+      <div class="toolbar-scroll">
+        <div class="search-section">
+          <div class="search-input-wrapper">
+            <input
+              v-model="searchQuery"
+              @input="handleSearchInput"
+              @keydown="handleKeyDown"
+              @keyup.enter="handleSearchEnter"
+              @focus="showSuggestions = true"
+              @blur="handleInputBlur"
+              class="stock-input"
+              placeholder="输入股票代码、公司名称或拼音，如：000001.SZ、平安银行、pinganyinhang、PAYH"
+              type="text"
+              autocomplete="off"
+            />
+            <!-- 搜索建议下拉列表 -->
+            <div v-if="showSuggestions && searchSuggestions.length > 0" class="suggestions-dropdown">
+              <div
+                v-for="(item, index) in searchSuggestions"
+                :key="index"
+                @mousedown="selectStock(item)"
+                class="suggestion-item"
+                :class="{ 'highlighted': highlightedIndex === index }"
+              >
+                <span class="suggestion-code">{{ item.code }}</span>
+                <span class="suggestion-name">{{ item.name }}</span>
+              </div>
             </div>
           </div>
+          <button @click="loadStockData" class="search-btn">查询</button>
         </div>
-        <button @click="loadStockData" class="search-btn">查询</button>
-      </div>
-      
-      <div class="period-section">
-        <button
-          v-for="period in periods"
-          :key="period.value"
-          @click="selectPeriod(period.value)"
-          :class="['period-btn', { active: currentPeriod === period.value }]"
-        >
-          {{ period.label }}
-        </button>
-      </div>
+        
+        <div class="period-section">
+          <button
+            v-for="period in periods"
+            :key="period.value"
+            @click="selectPeriod(period.value)"
+            :class="['period-btn', { active: currentPeriod === period.value }]"
+          >
+            {{ period.label }}
+          </button>
+        </div>
 
-      <div class="zoom-section">
-        <button
-          v-for="range in zoomRanges"
-          :key="range.label"
-          @click="zoomToRange(range)"
-          class="zoom-btn"
-        >
-          {{ range.label }}
-        </button>
+        <div class="zoom-section">
+          <button
+            v-for="range in zoomRanges"
+            :key="range.label"
+            @click="zoomToRange(range)"
+            class="zoom-btn"
+          >
+            {{ range.label }}
+          </button>
+        </div>
+        
+        <div class="info-section" v-if="stockInfo">
+          <!-- 桃心图标 -->
+          <div class="favorite-heart" @click="toggleFavorite" :title="isFavorite ? '取消自选' : '加入自选'">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+                :fill="isFavorite ? '#ff4757' : '#666'"
+                :stroke="isFavorite ? '#ff4757' : '#666'"
+                stroke-width="1.5"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          
+          <div class="info-block">
+            <span class="info-label">名称</span>
+            <span
+              class="info-value code clickable"
+              @click="openEastmoneyStock(stockInfo.stock_code)"
+              :title="'点击查看 ' + stockInfo.stock_code + ' 在东方财富的详情'"
+            >
+              {{ stockBasics?.name || '-' }}
+            </span>
+          </div>
+          <div class="info-block">
+            <span class="info-label">最新价</span>
+            <span class="info-value">{{ formatNumber(stockBasics?.price) }}</span>
+          </div>
+          <div class="info-block">
+            <span class="info-label">总市值</span>
+            <span class="info-value">{{ formatBillion(stockBasics?.market_cap) }}</span>
+          </div>
+          <div class="info-block">
+            <span class="info-label">市盈率-静</span>
+            <span class="info-value">{{ formatNumber(stockBasics?.pe_static) }}</span>
+          </div>
+          <div class="info-block">
+            <span class="info-label">市盈率-TTM</span>
+            <span class="info-value">{{ formatNumber(stockBasics?.pe_ttm) }}</span>
+          </div>
+          <div class="info-block">
+            <span class="info-label">市净率</span>
+            <span class="info-value">{{ formatNumber(stockBasics?.pb) }}</span>
+          </div>
+        </div>
       </div>
-      
-    <div class="info-section" v-if="stockInfo">
-      <!-- 桃心图标 -->
-      <div class="favorite-heart" @click="toggleFavorite" :title="isFavorite ? '取消自选' : '加入自选'">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-            :fill="isFavorite ? '#ff4757' : '#666'"
-            :stroke="isFavorite ? '#ff4757' : '#666'"
-            stroke-width="1.5"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </div>
-      
-      <div class="info-block">
-        <span class="info-label">代码</span>
-        <span class="info-value code clickable" @click="openFutunnStock(stockInfo.stock_code)" :title="'点击查看 ' + stockInfo.stock_code + ' 在富途的详情'">{{ stockInfo.stock_code }}</span>
-      </div>
-      <div class="info-block">
-        <span class="info-label">名称</span>
-        <span class="info-value">{{ stockBasics?.name || '-' }}</span>
-      </div>
-      <div class="info-block">
-        <span class="info-label">总市值</span>
-        <span class="info-value">{{ formatBillion(stockBasics?.market_cap) }}</span>
-      </div>
-      <div class="info-block">
-        <span class="info-label">市盈率</span>
-        <span class="info-value">{{ formatNumber(stockBasics?.pe_ttm) }}</span>
-      </div>
-      <div class="info-block">
-        <span class="info-label">市净率</span>
-        <span class="info-value">{{ formatNumber(stockBasics?.pb) }}</span>
-      </div>
-    </div>
     </div>
 
     <!-- 图表容器 -->
@@ -120,6 +133,102 @@
       <div v-else-if="error" class="error">{{ error }}</div>
       <div v-show="!loading && !error" ref="chartRef" class="chart"></div>
     </div>
+
+    <!-- 底部日志窗口 -->
+    <div class="strategy-log-window" v-if="strategyLogs.length > 0">
+      <div class="log-header">
+        <span>策略运行日志</span>
+        <button @click="strategyLogs = []" class="clear-log-btn">清空</button>
+      </div>
+      <div class="log-content" ref="logContentRef">
+        <div v-for="(log, index) in strategyLogs" :key="index" class="log-item">
+          <span class="log-time">[{{ log.time }}]</span>
+          <span class="log-message" :class="log.type">{{ log.message }}</span>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- 右侧交易策略窗口 -->
+    <div class="strategy-sidebar">
+      <div class="strategy-header">
+        <h3>交易策略</h3>
+      </div>
+      
+      <div class="strategy-content">
+        <!-- 第一部分：时间窗口配置 -->
+        <div class="strategy-section">
+          <div class="section-title">时间窗口配置</div>
+          <div class="config-item">
+            <label>买入窗口</label>
+            <div class="date-range">
+              <input v-model="strategyConfig.buyStart" placeholder="YYYYMMDD" class="date-input" />
+              <span>至</span>
+              <input v-model="strategyConfig.buyEnd" placeholder="YYYYMMDD" class="date-input" />
+            </div>
+          </div>
+          <div class="config-item">
+            <label>卖出窗口</label>
+            <div class="date-range">
+              <input v-model="strategyConfig.sellStart" placeholder="YYYYMMDD" class="date-input" />
+              <span>至</span>
+              <input v-model="strategyConfig.sellEnd" placeholder="YYYYMMDD" class="date-input" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 第二部分：策略选择 -->
+        <div class="strategy-section">
+          <div class="section-title">选择策略</div>
+          <div v-for="strategy in availableStrategies" :key="strategy.id" class="strategy-option">
+            <label class="radio-label">
+              <input 
+                type="radio" 
+                v-model="selectedStrategyId" 
+                :value="strategy.id"
+                @change="handleStrategyChange"
+              />
+              {{ strategy.name }}
+            </label>
+            <div v-if="selectedStrategyId === strategy.id" class="strategy-desc">
+              {{ strategy.description }}
+            </div>
+          </div>
+        </div>
+
+        <!-- 第三部分：评估结果 -->
+        <div class="strategy-section" v-if="evaluationResult">
+          <div class="section-title">策略效果评估</div>
+          <div class="evaluation-grid">
+            <div class="eval-item">
+              <span class="eval-label">最大收益率</span>
+              <span class="eval-value" :class="getProfitClass(evaluationResult.maxProfit)">{{ formatValue(evaluationResult.maxProfit) }}</span>
+            </div>
+            <div class="eval-item">
+              <span class="eval-label">最低收益率</span>
+              <span class="eval-value" :class="getProfitClass(evaluationResult.minProfit)">{{ formatValue(evaluationResult.minProfit) }}</span>
+            </div>
+            <div class="eval-item">
+              <span class="eval-label">中位数收益率</span>
+              <span class="eval-value" :class="getProfitClass(evaluationResult.medianProfit)">{{ formatValue(evaluationResult.medianProfit) }}</span>
+            </div>
+            <div class="eval-item">
+              <span class="eval-label">买入后30天最大收益率</span>
+              <span class="eval-value" :class="getProfitClass(evaluationResult.maxProfit30d)">{{ formatValue(evaluationResult.maxProfit30d) }}</span>
+            </div>
+            <div class="eval-item">
+              <span class="eval-label">买入后30天中位数收益率</span>
+              <span class="eval-value" :class="getProfitClass(evaluationResult.medianProfit30d)">{{ formatValue(evaluationResult.medianProfit30d) }}</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="strategy-actions">
+          <button @click="runStrategy" class="run-strategy-btn" :disabled="!selectedStrategyId || loading">
+            执行回测
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -142,14 +251,59 @@ const stockBasics = ref(null)
 const isFavorite = ref(false)
 const favoriteStocks = ref([])
 
+// 交易策略相关
+const strategyConfig = ref({
+  buyStart: '20210101',
+  buyEnd: '20221231',
+  sellStart: '20230101',
+  sellEnd: '20231231'
+})
+
+const availableStrategies = [
+  {
+    id: 'trend',
+    name: '趋势交易策略',
+    description: '买入：20日均线 > 60日均线，股价站上60日均线 ≥ 5个交易日。'
+  }
+]
+
+const selectedStrategyId = ref(null)
+const evaluationResult = ref(null)
+const tradingSignals = ref([]) // 存储 B/S 信号
+const strategyLogs = ref([]) // 策略运行日志
+const logContentRef = ref(null)
+
+// 监听日志长度变化，当日志窗口出现/消失时调整图表大小
+watch(() => strategyLogs.value.length, (newLen, oldLen) => {
+  if ((newLen > 0 && oldLen === 0) || (newLen === 0 && oldLen > 0)) {
+    nextTick(() => {
+      chartInstance?.resize()
+    })
+  }
+})
+
+const addLog = (message, type = 'info') => {
+  const now = new Date()
+  const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+  strategyLogs.value.push({ time, message, type })
+  
+  // 自动滚动到底部
+  nextTick(() => {
+    if (logContentRef.value) {
+      logContentRef.value.scrollTop = logContentRef.value.scrollHeight
+    }
+  })
+}
+
 // 搜索建议相关
 const searchSuggestions = ref([])
 const showSuggestions = ref(false)
 const highlightedIndex = ref(-1)
 let searchTimeout = null
+const localStockList = ref([])
+const localStockListLoaded = ref(false)
 
 const periods = [
-  { label: '分钟', value: 'minute' },
   { label: '日线', value: 'day' },
   { label: '周线', value: 'week' },
   { label: '月线', value: 'month' }
@@ -239,6 +393,56 @@ const initChart = async () => {
   }
 }
 
+const getLocalSuggestions = (query, limit = 10) => {
+  const q = query.trim()
+  if (!q) return []
+  const queryLower = q.toLowerCase().replace(/\s+/g, '')
+  const queryUpper = q.toUpperCase().replace(/\s+/g, '')
+  const queryNoSpace = q.replace(/\s+/g, '')
+  const results = []
+  const seen = new Set()
+
+  const pushResult = (stock) => {
+    if (results.length >= limit || seen.has(stock.code)) return
+    results.push({ code: stock.code, name: stock.name })
+    seen.add(stock.code)
+  }
+
+  for (let i = 0; i < localStockList.value.length && results.length < limit; i++) {
+    const stock = localStockList.value[i]
+    const codeMatch = stock.code?.toUpperCase().includes(queryUpper)
+    const nameMatch = stock.name?.replace(/\s+/g, '').includes(queryNoSpace)
+    if (codeMatch || nameMatch) {
+      pushResult(stock)
+    }
+  }
+
+  if (results.length < limit) {
+    for (let i = 0; i < localStockList.value.length && results.length < limit; i++) {
+      const stock = localStockList.value[i]
+      const pinyinMatch = stock.pinyin?.includes(queryLower)
+      const initialsMatch = stock.pinyin_initials?.includes(queryUpper)
+      if (pinyinMatch || initialsMatch) {
+        pushResult(stock)
+      }
+    }
+  }
+
+  return results
+}
+
+const loadLocalStockList = async () => {
+  try {
+    const response = await axios.get('/api/stock_list', { timeout: 10000 })
+    if (response.data?.success) {
+      localStockList.value = response.data.results || []
+      localStockListLoaded.value = true
+    }
+  } catch (err) {
+    console.warn('加载股票列表失败，使用后端搜索', err)
+  }
+}
+
 // 搜索股票
 const searchStocks = async (query) => {
   if (!query || query.trim().length < 1) {
@@ -246,6 +450,11 @@ const searchStocks = async (query) => {
     return
   }
   
+  if (localStockListLoaded.value) {
+    searchSuggestions.value = getLocalSuggestions(query, 10)
+    return
+  }
+
   try {
     const response = await axios.get('/api/search_stocks', {
       params: {
@@ -267,6 +476,10 @@ const searchStocks = async (query) => {
 
 // 处理搜索输入
 const handleSearchInput = () => {
+  // 重置高亮索引
+  highlightedIndex.value = -1
+  showSuggestions.value = true
+  
   // 清除之前的定时器
   if (searchTimeout) {
     clearTimeout(searchTimeout)
@@ -276,6 +489,47 @@ const handleSearchInput = () => {
   searchTimeout = setTimeout(() => {
     searchStocks(searchQuery.value)
   }, 300)
+}
+
+// 处理键盘按键
+const handleKeyDown = (e) => {
+  if (!showSuggestions.value || (searchSuggestions.value.length === 0 && !searchQuery.value)) {
+    return
+  }
+
+  // 如果提示框没显示但按了方向键，尝试显示
+  if (!showSuggestions.value && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    showSuggestions.value = true
+    if (searchSuggestions.value.length === 0) {
+      searchStocks(searchQuery.value)
+    }
+    return
+  }
+
+  switch (e.key) {
+    case 'ArrowDown':
+      e.preventDefault()
+      if (searchSuggestions.value.length > 0) {
+        highlightedIndex.value = (highlightedIndex.value + 1) % searchSuggestions.value.length
+      }
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      if (searchSuggestions.value.length > 0) {
+        highlightedIndex.value = (highlightedIndex.value - 1 + searchSuggestions.value.length) % searchSuggestions.value.length
+      }
+      break
+    case 'Escape':
+      showSuggestions.value = false
+      highlightedIndex.value = -1
+      break
+    case 'Enter':
+      if (highlightedIndex.value >= 0 && searchSuggestions.value[highlightedIndex.value]) {
+        e.preventDefault()
+        selectStock(searchSuggestions.value[highlightedIndex.value])
+      }
+      break
+  }
 }
 
 // 处理输入框失焦
@@ -389,7 +643,9 @@ const fetchStockInfo = async (code) => {
     if (resp.data?.success) {
       stockBasics.value = {
         name: resp.data.name,
+        price: resp.data.price,
         market_cap: resp.data.market_cap,
+        pe_static: resp.data.pe_static,
         pe_ttm: resp.data.pe_ttm,
         pb: resp.data.pb
       }
@@ -430,15 +686,16 @@ const renderChart = (data) => {
   // 成交量数据
   const volumes = data.map(item => parseFloat(item.vol))
   
-  // 计算MA5和MA20
+  // 计算MA5、MA20和MA60
   const ma5 = calculateMA(5, data)
   const ma20 = calculateMA(20, data)
+  const ma60 = calculateMA(60, data)
 
   const option = {
     backgroundColor: 'transparent',
     animation: false,
     legend: {
-      data: ['K线', 'MA5', 'MA20', '成交量'],
+      data: ['K线', 'MA5', 'MA20', 'MA60', '成交量'],
       textStyle: {
         color: '#e0e0e0'
       },
@@ -473,12 +730,12 @@ const renderChart = (data) => {
         left: '50px',
         right: '20px',
         top: '30px',
-        height: '65%'
+        height: '70%'
       },
       {
         left: '50px',
         right: '20px',
-        top: '75%',
+        top: '72%',
         height: '15%'
       }
     ],
@@ -495,12 +752,7 @@ const renderChart = (data) => {
         axisLabel: {
           color: '#999',
           formatter: function (value) {
-            // 根据周期显示不同格式
-            if (currentPeriod.value === 'minute') {
-              return value.split(' ')[1] || value
-            } else {
-              return value.split(' ')[0] || value
-            }
+            return value.split(' ')[0] || value
           }
         }
       },
@@ -602,6 +854,7 @@ const renderChart = (data) => {
         type: 'line',
         data: ma5,
         smooth: true,
+        itemStyle: { color: '#ff9800' },
         lineStyle: {
           width: 1,
           color: '#ff9800'
@@ -613,9 +866,22 @@ const renderChart = (data) => {
         type: 'line',
         data: ma20,
         smooth: true,
+        itemStyle: { color: '#2196f3' },
         lineStyle: {
           width: 1,
           color: '#2196f3'
+        },
+        symbol: 'none'
+      },
+      {
+        name: 'MA60',
+        type: 'line',
+        data: ma60,
+        smooth: true,
+        itemStyle: { color: '#9c27b0' },
+        lineStyle: {
+          width: 1,
+          color: '#9c27b0'
         },
         symbol: 'none'
       },
@@ -743,32 +1009,322 @@ const selectFavoriteStock = (code) => {
   loadStockData()
 }
 
-// 跳转到富途股票页面
-const openFutunnStock = (stockCode) => {
-  if (!stockCode) return
+// 策略相关方法
+const handleStrategyChange = () => {
+  evaluationResult.value = null
+  tradingSignals.value = []
+}
+
+const getProfitClass = (profit) => {
+  if (!profit) return ''
+  return profit > 0 ? 'profit-positive' : (profit < 0 ? 'profit-negative' : '')
+}
+
+const formatValue = (val) => {
+  if (val === null || val === undefined) return '-'
+  return `${val.toFixed(2)}%`
+}
+
+const runStrategy = () => {
+  if (!selectedStrategyId.value || !chartInstance) return
   
-  // 富途的URL格式：将 .SZ 转换为 -SZ，.SH 转换为 -SH
-  // 例如：000001.SZ -> 000001-SZ, 600000.SH -> 600000-SH
-  let futunnCode = stockCode
+  strategyLogs.value = [] // 清空旧日志
+  addLog(`开始执行策略: ${availableStrategies.find(s => s.id === selectedStrategyId.value)?.name}`, 'info')
   
-  // 如果包含点号，转换为连字符格式
-  if (futunnCode.includes('.')) {
-    futunnCode = futunnCode.replace(/\.SZ$/i, '-SZ').replace(/\.SH$/i, '-SH')
-  } else {
-    // 如果代码中没有市场后缀，根据代码判断市场（6开头是沪市，其他是深市）
-    if (/^6\d{5}$/.test(futunnCode)) {
-      futunnCode = futunnCode + '-SH'
-    } else if (/^\d{6}$/.test(futunnCode)) {
-      futunnCode = futunnCode + '-SZ'
+  const option = chartInstance.getOption()
+  const dates = option.xAxis[0].data
+  const klineSeries = option.series.find(s => s.name === 'K线')
+  const seriesData = klineSeries.data
+  const volumes = option.series.find(s => s.name === '成交量').data
+  const ma20 = option.series.find(s => s.name === 'MA20').data
+  const ma60 = option.series.find(s => s.name === 'MA60').data
+  
+  const signals = []
+  const buyWindowPrices = []
+  const sellWindowPrices = []
+  let buySignalIndex = -1
+  let buySignalPrice = 0
+  
+  // 转换日期格式 YYYYMMDD -> YYYY-MM-DD
+  const formatDate = (str) => {
+    if (!str || str.length !== 8) return ''
+    return `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`
+  }
+  const buyStart = formatDate(strategyConfig.value.buyStart)
+  const buyEnd = formatDate(strategyConfig.value.buyEnd)
+  const sellStart = formatDate(strategyConfig.value.sellStart)
+  const sellEnd = formatDate(strategyConfig.value.sellEnd)
+
+  addLog(`配置参数: 买入窗口(${buyStart} 至 ${buyEnd}), 卖出窗口(${sellStart} 至 ${sellEnd})`, 'info')
+
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i]
+    const close = seriesData[i][1]
+    if (date >= buyStart && date <= buyEnd) {
+      buyWindowPrices.push(close)
+    }
+    if (date >= sellStart && date <= sellEnd) {
+      sellWindowPrices.push(close)
+    }
+  }
+
+  const buyAvgPrice = buyWindowPrices.length > 0
+    ? buyWindowPrices.reduce((sum, price) => sum + price, 0) / buyWindowPrices.length
+    : 0
+
+  if (selectedStrategyId.value === 'trend') {
+    let holdPrice = 0
+    let above60Days = 0
+    
+    // 1. 查找第一个符合买入条件的日期
+    for (let i = 60; i < dates.length; i++) {
+      const date = dates[i]
+      const close = seriesData[i][1]
+      
+      if (date >= buyStart && date <= buyEnd && holdPrice === 0) {
+        const currentMA20 = parseFloat(ma20[i])
+        const currentMA60 = parseFloat(ma60[i])
+        
+        if (!isNaN(currentMA20) && !isNaN(currentMA60) && currentMA20 > currentMA60 && close > currentMA60) {
+          above60Days++
+        } else {
+          above60Days = 0
+        }
+        
+        if (above60Days >= 5) {
+          holdPrice = close
+          buySignalIndex = i
+          buySignalPrice = close
+          const buyPrice = parseFloat(seriesData[i][3])
+          signals.push({ index: i, type: 'B', price: buyPrice, date: date })
+          addLog(`${date}: [买入] 触发买入信号，买入价格 ${holdPrice.toFixed(2)}`, 'buy')
+          break // 找到第一个买入点后停止查找
+        }
+      }
+    }
+
+    if (holdPrice === 0) {
+      addLog(`买入窗口内未触发买入信号，仅用于标注展示`, 'info')
+    }
+
+    const getMedianRate = (rates) => {
+      if (rates.length === 0) return 0
+      const sortedRates = [...rates].sort((a, b) => a - b)
+      const midIndex = Math.floor(sortedRates.length / 2)
+      return sortedRates.length % 2 === 0
+        ? (sortedRates[midIndex - 1] + sortedRates[midIndex]) / 2
+        : sortedRates[midIndex]
+    }
+
+    let maxProfit30d = 0
+    let medianProfit30d = 0
+    if (buySignalIndex >= 0 && buySignalPrice > 0) {
+      const rates30d = []
+      let counted = 0
+      for (let i = buySignalIndex; i < dates.length && counted < 30; i++) {
+        const close = seriesData[i][1]
+        rates30d.push(((close - buySignalPrice) / buySignalPrice) * 100)
+        counted += 1
+      }
+      if (rates30d.length > 0) {
+        maxProfit30d = Math.max(...rates30d)
+        medianProfit30d = getMedianRate(rates30d)
+      }
+    }
+
+    if (buyAvgPrice > 0 && sellWindowPrices.length > 0) {
+      const yieldRates = sellWindowPrices.map(price => ((price - buyAvgPrice) / buyAvgPrice) * 100)
+      const medianRate = getMedianRate(yieldRates)
+      const maxSellPrice = Math.max(...sellWindowPrices)
+      const minSellPrice = Math.min(...sellWindowPrices)
+
+      evaluationResult.value = {
+        maxProfit: ((maxSellPrice - buyAvgPrice) / buyAvgPrice) * 100,
+        minProfit: ((minSellPrice - buyAvgPrice) / buyAvgPrice) * 100,
+        medianProfit: medianRate,
+        maxProfit30d,
+        medianProfit30d
+      }
+      addLog(`策略执行完毕，买入窗口均价 ${buyAvgPrice.toFixed(2)}，卖出窗口交易日 ${sellWindowPrices.length} 个`, 'info')
+      addLog(`最大收益率: ${evaluationResult.value.maxProfit.toFixed(2)}%`, 'info')
+    } else {
+      evaluationResult.value = {
+        maxProfit: 0,
+        minProfit: 0,
+        medianProfit: 0,
+        maxProfit30d: 0,
+        medianProfit30d: 0
+      }
+      addLog(`策略执行完毕，买入或卖出窗口无有效交易日`, 'info')
     }
   }
   
-  const url = `https://www.futunn.com/stock/${futunnCode}`
+  tradingSignals.value = signals
+  
+  updateChartWithSignals()
+
+  const getDateByOffset = (dateStr, monthsOffset) => {
+    if (!dateStr) return ''
+    const date = new Date(dateStr.replace(/-/g, '/'))
+    if (Number.isNaN(date.getTime())) return ''
+    const target = new Date(date)
+    target.setMonth(target.getMonth() + monthsOffset)
+    const yyyy = target.getFullYear()
+    const mm = String(target.getMonth() + 1).padStart(2, '0')
+    const dd = String(target.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  const getIndexByDate = (dates, targetDate) => {
+    if (!targetDate) return 0
+    for (let i = 0; i < dates.length; i++) {
+      if (dates[i] >= targetDate) return i
+    }
+    return dates.length - 1
+  }
+
+  if (dates.length > 0) {
+    const zoomStartDate = getDateByOffset(buyStart, -1)
+    const zoomEndDate = getDateByOffset(sellEnd, 1)
+    const startIndex = getIndexByDate(dates, zoomStartDate)
+    const endIndex = getIndexByDate(dates, zoomEndDate)
+    const startPercent = (startIndex / dates.length) * 100
+    const endPercent = ((endIndex + 1) / dates.length) * 100
+    chartInstance.dispatchAction({
+      type: 'dataZoom',
+      start: Math.max(0, Math.min(100, startPercent)),
+      end: Math.max(0, Math.min(100, endPercent))
+    })
+  }
+}
+
+const updateChartWithSignals = () => {
+  if (!chartInstance) return
+  
+  const markPoints = tradingSignals.value.map(sig => ({
+    name: sig.type,
+    coord: [sig.date, sig.price],
+    value: sig.type,
+    symbol: 'pin',
+    symbolSize: 30,
+    symbolOffset: [0, sig.type === 'B' ? -10 : 10],
+    itemStyle: {
+      color: sig.type === 'B' ? '#ef5350' : '#26a69a'
+    },
+    label: {
+      show: true,
+      position: 'inside',
+      formatter: sig.type,
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 12
+    }
+  }))
+  
+  console.log('更新标注点:', markPoints.length, markPoints)
+  
+  // 获取当前所有 series，确保只更新“K线”系列的 markPoint
+  const option = chartInstance.getOption()
+  const klineSeriesIndex = option.series.findIndex(s => s.name === 'K线')
+
+  const formatDate = (str) => {
+    if (!str || str.length !== 8) return ''
+    return `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`
+  }
+  const getFirstDateInWindow = (dates, start, end) => {
+    if (!start || !end) return ''
+    for (let i = 0; i < dates.length; i++) {
+      if (dates[i] >= start && dates[i] <= end) return dates[i]
+    }
+    return ''
+  }
+
+  const dates = option.xAxis?.[0]?.data || []
+  const buyStart = formatDate(strategyConfig.value.buyStart)
+  const buyEnd = formatDate(strategyConfig.value.buyEnd)
+  const sellStart = formatDate(strategyConfig.value.sellStart)
+  const sellEnd = formatDate(strategyConfig.value.sellEnd)
+  const buyStartDate = getFirstDateInWindow(dates, buyStart, buyEnd)
+  const sellStartDate = getFirstDateInWindow(dates, sellStart, sellEnd)
+  const markLines = []
+  if (buyStartDate) {
+    markLines.push({
+      xAxis: buyStartDate,
+      lineStyle: {
+        color: '#ef5350',
+        type: 'dashed',
+        width: 1
+      },
+      label: {
+        show: false
+      }
+    })
+  }
+  if (sellStartDate) {
+    markLines.push({
+      xAxis: sellStartDate,
+      lineStyle: {
+        color: '#26a69a',
+        type: 'dashed',
+        width: 1
+      },
+      label: {
+        show: false
+      }
+    })
+  }
+  
+  if (klineSeriesIndex !== -1) {
+    // 构造一个新的 series 数组，只包含我们要更新的那一项
+    // ECharts 会根据索引或名称自动合并
+    const updatedSeries = option.series.map((s, idx) => {
+      if (idx === klineSeriesIndex) {
+        return {
+          ...s,
+          markPoint: {
+            data: markPoints,
+            animation: true,
+            z: 10
+          },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            data: markLines
+          }
+        }
+      }
+      return s
+    })
+    
+    chartInstance.setOption({
+      series: updatedSeries
+    }, { notMerge: false }) // notMerge: false 表示合并模式
+  }
+}
+
+// 跳转到东方财富股票页面
+const openEastmoneyStock = (stockCode) => {
+  if (!stockCode) return
+  
+  // 东方财富的URL格式：https://quote.eastmoney.com/sz000001.html 或 https://quote.eastmoney.com/sh600000.html
+  let code = stockCode.toUpperCase()
+  let emCode = ''
+  
+  if (code.includes('.')) {
+    const [base, suffix] = code.split('.')
+    emCode = (suffix === 'SZ' ? 'sz' : 'sh') + base
+  } else {
+    // 如果没有后缀，简单判断
+    emCode = (code.startsWith('6') ? 'sh' : 'sz') + code
+  }
+  
+  const url = `https://quote.eastmoney.com/${emCode}.html`
   window.open(url, '_blank')
 }
 
 onMounted(async () => {
   await initChart()
+  await loadLocalStockList()
   // 加载自选股票列表
   await loadFavoriteStocks()
   // 默认加载000001.SZ的数据
@@ -783,10 +1339,11 @@ onMounted(async () => {
   display: flex;
   background: #1a1a1a;
   overflow: hidden;
+  position: relative;
 }
 
 .favorites-sidebar {
-  width: 125px;
+  width: 100px;
   background: #1a1a1a;
   border-right: 1px solid #333;
   display: flex;
@@ -796,33 +1353,33 @@ onMounted(async () => {
 }
 
 .favorites-header {
-  padding: 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid #333;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .favorites-header h3 {
   margin: 0;
   color: #e0e0e0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .favorites-count {
   color: #777;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .favorites-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 5px;
 }
 
 .favorite-item {
-  padding: 10px 12px;
+  padding: 8px 10px;
   margin-bottom: 4px;
   background: #252525;
   border-radius: 4px;
@@ -860,18 +1417,28 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .toolbar {
-  padding: 10px 20px;
+  padding: 6px 12px;
   background: #252525;
   border-bottom: 1px solid #333;
+  display: block;
+  overflow: visible;
+  position: relative;
+  z-index: 9999;
+  margin-bottom: 6px;
+}
+
+.toolbar-scroll {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 8px;
   flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
 }
 
 .search-section {
@@ -883,16 +1450,17 @@ onMounted(async () => {
 
 .search-input-wrapper {
   position: relative;
+  z-index: 2;
 }
 
 .stock-input {
-  padding: 8px 15px;
+  padding: 6px 10px;
   background: #1a1a1a;
   border: 1px solid #444;
   border-radius: 4px;
   color: #e0e0e0;
-  font-size: 14px;
-  width: 150px;
+  font-size: 12px;
+  width: 140px;
   outline: none;
   transition: border-color 0.3s;
 }
@@ -905,15 +1473,15 @@ onMounted(async () => {
   position: absolute;
   top: 100%;
   left: 0;
-  right: 0;
+  min-width: 260px;
   margin-top: 4px;
   background: #252525;
   border: 1px solid #444;
   border-radius: 4px;
-  max-height: 300px;
+  max-height: 400px;
   overflow-y: auto;
-  z-index: 1000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .suggestion-item {
@@ -933,6 +1501,8 @@ onMounted(async () => {
 .suggestion-item:hover,
 .suggestion-item.highlighted {
   background: #333;
+  border-left: 3px solid #2196f3;
+  padding-left: 12px;
 }
 
 .suggestion-code {
@@ -947,13 +1517,13 @@ onMounted(async () => {
 }
 
 .search-btn {
-  padding: 8px 20px;
+  padding: 6px 12px;
   background: #2196f3;
   border: none;
   border-radius: 4px;
   color: white;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
   transition: background 0.3s;
 }
 
@@ -968,13 +1538,13 @@ onMounted(async () => {
 }
 
 .period-btn {
-  padding: 6px 15px;
+  padding: 4px 10px;
   background: #333;
   border: 1px solid #444;
   border-radius: 4px;
   color: #999;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   transition: all 0.3s;
 }
 
@@ -996,13 +1566,13 @@ onMounted(async () => {
 }
 
 .zoom-btn {
-  padding: 6px 10px;
+  padding: 4px 8px;
   background: #2a2a2a;
   border: 1px solid #444;
   border-radius: 4px;
   color: #999;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   transition: all 0.3s;
 }
 
@@ -1014,9 +1584,9 @@ onMounted(async () => {
 
 .info-section {
   display: flex;
-  gap: 16px;
+  gap: 6px;
   margin-left: auto;
-  font-size: 13px;
+  font-size: 10px;
   flex-wrap: nowrap;
   align-items: center;
   flex-shrink: 0;
@@ -1024,20 +1594,23 @@ onMounted(async () => {
 
 .info-block {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
-  min-width: 90px;
+  min-width: auto;
+  white-space: nowrap;
 }
 
 .info-label {
   color: #777;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .info-value {
   color: #e0e0e0;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1;
+  font-size: 11px;
 }
 
 .info-value.code {
@@ -1061,27 +1634,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  padding: 2px;
   transition: transform 0.2s;
-  margin-right: 8px;
-}
-
-.favorite-heart:hover {
-  transform: scale(1.1);
-}
-
-.favorite-heart svg {
-  transition: all 0.2s;
-}
-
-.favorite-heart {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  transition: transform 0.2s;
-  margin-right: 8px;
+  margin-right: 4px;
 }
 
 .favorite-heart:hover {
@@ -1096,11 +1651,14 @@ onMounted(async () => {
   flex: 1;
   position: relative;
   overflow: hidden;
+  z-index: 0;
 }
 
 .chart {
   width: 100%;
   height: 100%;
+  position: relative;
+  z-index: 0;
 }
 
 .loading,
@@ -1116,5 +1674,251 @@ onMounted(async () => {
 .error {
   color: #ef5350;
 }
-</style>
 
+/* 交易策略侧边栏样式 */
+.strategy-sidebar {
+  width: 280px;
+  background: #1a1a1a;
+  border-left: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.strategy-header {
+  padding: 16px;
+  border-bottom: 1px solid #333;
+}
+
+.strategy-header h3 {
+  margin: 0;
+  color: #e0e0e0;
+  font-size: 16px;
+}
+
+.strategy-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.strategy-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-title {
+  color: #2196f3;
+  font-size: 14px;
+  font-weight: 600;
+  border-left: 3px solid #2196f3;
+  padding-left: 8px;
+}
+
+.config-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-item label {
+  color: #999;
+  font-size: 12px;
+}
+
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-input {
+  flex: 1;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: #e0e0e0;
+  font-size: 12px;
+  outline: none;
+}
+
+.date-range span {
+  color: #666;
+  font-size: 12px;
+}
+
+.strategy-option {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: #252525;
+  border-radius: 4px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e0e0e0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.strategy-desc {
+  color: #777;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px;
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.evaluation-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.eval-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #252525;
+  border-radius: 4px;
+}
+
+.eval-label {
+  color: #999;
+  font-size: 12px;
+}
+
+.eval-value {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.profit-positive {
+  color: #ef5350;
+}
+
+.profit-negative {
+  color: #26a69a;
+}
+
+.strategy-actions {
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.run-strategy-btn {
+  width: 100%;
+  padding: 10px;
+  background: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.run-strategy-btn:hover:not(:disabled) {
+  background: #1976d2;
+}
+
+.run-strategy-btn:disabled {
+  background: #333;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* 策略日志窗口样式 */
+.strategy-log-window {
+  height: 75px;
+  background: #1a1a1a;
+  border-top: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  resize: vertical;
+  overflow: auto;
+  min-height: 60px;
+  max-height: 300px;
+}
+
+.log-header {
+  padding: 8px 16px;
+  background: #252525;
+  border-bottom: 1px solid #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.log-header span {
+  color: #2196f3;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.clear-log-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #999;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.clear-log-btn:hover {
+  background: #333;
+  color: #e0e0e0;
+}
+
+.log-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.log-item {
+  margin-bottom: 4px;
+  display: flex;
+  gap: 8px;
+}
+
+.log-time {
+  color: #555;
+  flex-shrink: 0;
+}
+
+.log-message {
+  color: #ccc;
+  word-break: break-all;
+}
+
+.log-message.buy {
+  color: #ef5350;
+  font-weight: 600;
+}
+
+.log-message.sell {
+  color: #26a69a;
+  font-weight: 600;
+}
+
+.log-message.info {
+  color: #999;
+}
+</style>

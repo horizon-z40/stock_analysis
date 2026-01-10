@@ -17,6 +17,7 @@ const app = createApp({
             count: 0
         });
         const stockData = ref([]);
+        const stockBasics = ref(null);
         
         // 图表引用
         const klineChartRef = ref(null);
@@ -135,6 +136,18 @@ const app = createApp({
 
                 const response = await fetch(url);
                 const data = await response.json();
+
+                // 获取基础信息
+                try {
+                    const infoResponse = await fetch(`/api/stock_info/${encodeURIComponent(stockCode.value.trim())}`);
+                    const infoData = await infoResponse.json();
+                    if (infoData.success) {
+                        console.log('获取到基础信息:', infoData);
+                        stockBasics.value = infoData;
+                    }
+                } catch (e) {
+                    console.warn('获取基础信息失败', e);
+                }
 
                 loading.value = false;
 
@@ -291,27 +304,48 @@ const app = createApp({
                         type: 'line',
                         data: calculateMA(5, stockData.value),
                         smooth: true,
+                        itemStyle: { color: '#ff9800' },
                         lineStyle: {
-                            opacity: 0.5
-                        }
+                            color: '#ff9800',
+                            opacity: 0.8
+                        },
+                        symbol: 'none'
                     },
                     {
                         name: 'MA10',
                         type: 'line',
                         data: calculateMA(10, stockData.value),
                         smooth: true,
+                        itemStyle: { color: '#4caf50' },
                         lineStyle: {
-                            opacity: 0.5
-                        }
+                            color: '#4caf50',
+                            opacity: 0.8
+                        },
+                        symbol: 'none'
                     },
                     {
                         name: 'MA20',
                         type: 'line',
                         data: calculateMA(20, stockData.value),
                         smooth: true,
+                        itemStyle: { color: '#2196f3' },
                         lineStyle: {
-                            opacity: 0.5
-                        }
+                            color: '#2196f3',
+                            opacity: 0.8
+                        },
+                        symbol: 'none'
+                    },
+                    {
+                        name: 'MA60',
+                        type: 'line',
+                        data: calculateMA(60, stockData.value),
+                        smooth: true,
+                        itemStyle: { color: '#9c27b0' },
+                        lineStyle: {
+                            color: '#9c27b0',
+                            opacity: 0.8
+                        },
+                        symbol: 'none'
                     }
                 ]
             };
@@ -443,13 +477,17 @@ const app = createApp({
 
         // 格式化数字
         const formatNumber = (num) => {
+            if (num === null || num === undefined || num === '') return '-';
             const n = parseFloat(num);
-            if (n >= 100000000) {
-                return (n / 100000000).toFixed(2) + '亿';
-            } else if (n >= 10000) {
-                return (n / 10000).toFixed(2) + '万';
-            }
-            return n.toLocaleString();
+            if (isNaN(n)) return '-';
+            return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        const formatBillion = (num) => {
+            if (num === null || num === undefined || num === '') return '-';
+            const n = parseFloat(num);
+            if (isNaN(n)) return '-';
+            return (n / 100000000).toFixed(2) + '亿';
         };
 
         // 显示错误
@@ -458,6 +496,24 @@ const app = createApp({
             setTimeout(() => {
                 error.value = '';
             }, 5000);
+        };
+
+        // 跳转到东方财富股票页面
+        const openEastmoneyStock = (stockCode) => {
+            if (!stockCode) return;
+            
+            let code = stockCode.toUpperCase();
+            let emCode = '';
+            
+            if (code.includes('.')) {
+                const [base, suffix] = code.split('.');
+                emCode = (suffix === 'SZ' ? 'sz' : 'sh') + base;
+            } else {
+                emCode = (code.startsWith('6') ? 'sh' : 'sz') + code;
+            }
+            
+            const url = `https://quote.eastmoney.com/${emCode}.html`;
+            window.open(url, '_blank');
         };
 
         // 窗口大小改变时调整图表
@@ -492,12 +548,16 @@ const app = createApp({
             loading,
             error,
             stockInfo,
+            stockBasics,
             klineChartRef,
             volumeChartRef,
             searchStock,
             initCharts,
             zoomRanges,
-            zoomToRange
+            zoomToRange,
+            formatNumber,
+            formatBillion,
+            openEastmoneyStock
         };
     }
 });

@@ -38,8 +38,15 @@
                         </div>
                     </div>
                     
-                    <div class="stock-info-header" v-if="stockInfo.show" style="display: flex; gap: 15px; align-items: center; font-size: 0.9rem;">
-                        <span><strong>代码:</strong> {{ stockInfo.code }}</span>
+                    <div class="stock-info-header" v-if="stockInfo.show" style="display: flex; gap: 12px; align-items: center; font-size: 0.85rem; flex-wrap: wrap;">
+                        <span><strong>代码:</strong> <a href="#" @click.prevent="openEastmoneyStock(stockInfo.code)" style="color: #64b5f6; text-decoration: none;"></a>{{ stockInfo.code }}</a></span>
+                        <template v-if="stockBasics">
+                            <span><strong>名称:</strong> {{ stockBasics.name }}</span>
+                            <span><strong>最新价:</strong> {{ formatNumber(stockBasics.price) }}</span>
+                            <span><strong>市值:</strong> {{ formatBillion(stockBasics.market_cap) }}</span>
+                            <span><strong>PE(静):</strong> {{ formatNumber(stockBasics.pe_static) }}</span>
+                            <span><strong>PE(TTM):</strong> {{ formatNumber(stockBasics.pe_ttm) }}</span>
+                        </template>
                         <span><strong>年份:</strong> {{ stockInfo.year }}</span>
                         <span><strong>周期:</strong> {{ stockInfo.period }}</span>
                         <div class="zoom-box">

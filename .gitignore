@@ -1,4 +1,4 @@
-stock/
+data/
 
 # 启动脚本生成的临时文件
 .server.pid

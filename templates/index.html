@@ -12,37 +12,48 @@
     <div id="app">
         <div class="container">
             <header class="header">
-                <h1>股票策略回测系统</h1>
-                <div class="search-box">
-                    <input 
-                        type="text" 
-                        v-model="stockCode"
-                        @keypress.enter="searchStock"
-                        placeholder="输入股票代码，如：000001.SZ 或 000001，按回车查询"
-                        autocomplete="off"
-                    >
-                    <select v-model="selectedYear">
-                        <option value="">最新年份</option>
-                        <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
-                    </select>
-                    <select v-model="selectedPeriod">
-                        <option value="minute">分钟</option>
-                        <option value="day">日</option>
-                        <option value="week">周</option>
-                        <option value="month">月</option>
-                    </select>
-                    <button @click="searchStock">查询</button>
+                <div class="header-content" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                    <div class="search-section" style="display: flex; align-items: center; gap: 10px;">
+                        <h1 style="margin: 0; font-size: 1.2rem; margin-right: 10px;">股票策略回测系统</h1>
+                        <div class="search-box" style="display: flex; gap: 5px;">
+                            <input 
+                                type="text" 
+                                v-model="stockCode"
+                                @keypress.enter="searchStock"
+                                placeholder="输入代码"
+                                autocomplete="off"
+                                style="width: 120px;"
+                            >
+                            <select v-model="selectedYear" style="width: 90px;">
+                                <option value="">最新年份</option>
+                                <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
+                            </select>
+                            <select v-model="selectedPeriod" style="width: 60px;">
+                                <option value="minute">分钟</option>
+                                <option value="day">日</option>
+                                <option value="week">周</option>
+                                <option value="month">月</option>
+                            </select>
+                            <button @click="searchStock">查询</button>
+                        </div>
+                    </div>
+                    
+                    <div class="stock-info-header" v-if="stockInfo.show" style="display: flex; gap: 15px; align-items: center; font-size: 0.9rem;">
+                        <span><strong>代码:</strong> {{ stockInfo.code }}</span>
+                        <span><strong>年份:</strong> {{ stockInfo.year }}</span>
+                        <span><strong>周期:</strong> {{ stockInfo.period }}</span>
+                        <div class="zoom-box">
+                            <button v-for="range in zoomRanges" :key="range.label" @click="zoomToRange(range)" class="zoom-btn" style="margin: 0 2px; padding: 2px 6px; cursor: pointer; font-size: 0.8rem;">
+                                {{ range.label }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </header>
 
             <div class="content">
-                <div class="stock-info" v-if="stockInfo.show">
-                    <h2>股票代码: {{ stockInfo.code }}</h2>
-                    <p>数据年份: {{ stockInfo.year }}</p>
-                    <p>时间周期: {{ stockInfo.period }}</p>
-                    <p>数据条数: {{ stockInfo.count }}</p>
-                </div>
-
+                <!-- stock-info moved to header -->
+                
                 <div class="chart-container">
                     <div ref="klineChartRef" class="chart"></div>
                 </div>

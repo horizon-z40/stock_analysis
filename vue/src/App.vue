@@ -13,7 +13,6 @@
           class="favorite-item"
           @click="selectFavoriteStock(stock.code)"
         >
-          <span class="favorite-code">{{ stock.code }}</span>
           <span class="favorite-name">{{ stock.name || '-' }}</span>
         </div>
         <div v-if="favoriteStocks.length === 0" class="favorites-empty">
@@ -66,6 +65,17 @@
           {{ period.label }}
         </button>
       </div>
+
+      <div class="zoom-section">
+        <button
+          v-for="range in zoomRanges"
+          :key="range.label"
+          @click="zoomToRange(range)"
+          class="zoom-btn"
+        >
+          {{ range.label }}
+        </button>
+      </div>
       
     <div class="info-section" v-if="stockInfo">
       <!-- 桃心图标 -->
@@ -100,10 +110,6 @@
       <div class="info-block">
         <span class="info-label">市净率</span>
         <span class="info-value">{{ formatNumber(stockBasics?.pb) }}</span>
-      </div>
-      <div class="info-block">
-        <span class="info-label">数据量</span>
-        <span class="info-value">{{ stockInfo.count }}</span>
       </div>
     </div>
     </div>
@@ -148,6 +154,58 @@ const periods = [
   { label: '周线', value: 'week' },
   { label: '月线', value: 'month' }
 ]
+
+const zoomRanges = [
+  { label: '近1周', value: 7, unit: 'day' },
+  { label: '近1月', value: 1, unit: 'month' },
+  { label: '近1年', value: 1, unit: 'year' },
+  { label: '近3年', value: 3, unit: 'year' },
+  { label: '近5年', value: 5, unit: 'year' }
+]
+
+// 缩放至指定范围
+const zoomToRange = (range) => {
+  if (!chartInstance) return
+  
+  const option = chartInstance.getOption()
+  if (!option.xAxis || !option.xAxis[0] || !option.xAxis[0].data) return
+  
+  const dates = option.xAxis[0].data
+  if (dates.length === 0) return
+
+  // 获取最后一个日期
+  const lastDateStr = dates[dates.length - 1]
+  // 兼容处理日期字符串，确保能正确解析
+  const lastDate = new Date(lastDateStr.replace(/-/g, '/')) 
+  
+  const targetDate = new Date(lastDate)
+  
+  if (range.unit === 'day') {
+    targetDate.setDate(targetDate.getDate() - range.value)
+  } else if (range.unit === 'month') {
+    targetDate.setMonth(targetDate.getMonth() - range.value)
+  } else if (range.unit === 'year') {
+    targetDate.setFullYear(targetDate.getFullYear() - range.value)
+  }
+  
+  // 查找最接近目标日期的索引
+  let targetIndex = 0
+  for (let i = 0; i < dates.length; i++) {
+    const currentDate = new Date(dates[i].replace(/-/g, '/'))
+    if (currentDate >= targetDate) {
+      targetIndex = i
+      break
+    }
+  }
+  
+  const startPercent = (targetIndex / dates.length) * 100
+  
+  chartInstance.dispatchAction({
+    type: 'dataZoom',
+    start: startPercent,
+    end: 100
+  })
+}
 
 // 初始化图表
 const initChart = async () => {
@@ -412,15 +470,15 @@ const renderChart = (data) => {
     },
     grid: [
       {
-        left: '10%',
-        right: '8%',
-        top: '15%',
-        height: '60%'
+        left: '50px',
+        right: '20px',
+        top: '30px',
+        height: '65%'
       },
       {
-        left: '10%',
-        right: '8%',
-        top: '80%',
+        left: '50px',
+        right: '20px',
+        top: '75%',
         height: '15%'
       }
     ],
@@ -728,7 +786,7 @@ onMounted(async () => {
 }
 
 .favorites-sidebar {
-  width: 250px;
+  width: 125px;
   background: #1a1a1a;
   border-right: 1px solid #333;
   display: flex;
@@ -806,19 +864,21 @@ onMounted(async () => {
 }
 
 .toolbar {
-  padding: 15px 20px;
+  padding: 10px 20px;
   background: #252525;
   border-bottom: 1px solid #333;
   display: flex;
   align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
+  gap: 15px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .search-section {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .search-input-wrapper {
@@ -832,7 +892,7 @@ onMounted(async () => {
   border-radius: 4px;
   color: #e0e0e0;
   font-size: 14px;
-  width: 300px;
+  width: 150px;
   outline: none;
   transition: border-color 0.3s;
 }
@@ -904,6 +964,7 @@ onMounted(async () => {
 .period-section {
   display: flex;
   gap: 5px;
+  flex-shrink: 0;
 }
 
 .period-btn {
@@ -928,13 +989,37 @@ onMounted(async () => {
   color: white;
 }
 
+.zoom-section {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.zoom-btn {
+  padding: 6px 10px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #999;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.3s;
+}
+
+.zoom-btn:hover {
+  background: #333;
+  color: #e0e0e0;
+  border-color: #666;
+}
+
 .info-section {
   display: flex;
   gap: 16px;
   margin-left: auto;
   font-size: 13px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .info-block {

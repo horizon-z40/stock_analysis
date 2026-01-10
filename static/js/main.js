@@ -32,6 +32,66 @@ const app = createApp({
             'month': '月'
         };
 
+        const zoomRanges = [
+            { label: '近1周', value: 7, unit: 'day' },
+            { label: '近1月', value: 1, unit: 'month' },
+            { label: '近1年', value: 1, unit: 'year' },
+            { label: '近3年', value: 3, unit: 'year' },
+            { label: '近5年', value: 5, unit: 'year' }
+        ];
+
+        const zoomToRange = (range) => {
+            if (!klineChart) return;
+            
+            const option = klineChart.getOption();
+            if (!option.xAxis || !option.xAxis.data) return; // axis data is usually directly on xAxis object or xAxis[0]
+            
+            // In drawCharts, xAxis is an object, not array, but getOption() returns array for components
+            const xAxis = Array.isArray(option.xAxis) ? option.xAxis[0] : option.xAxis;
+            const dates = xAxis.data;
+            
+            if (!dates || dates.length === 0) return;
+
+            const lastDateStr = dates[dates.length - 1];
+            const lastDate = new Date(lastDateStr.replace(/-/g, '/'));
+            
+            const targetDate = new Date(lastDate);
+            
+            if (range.unit === 'day') {
+                targetDate.setDate(targetDate.getDate() - range.value);
+            } else if (range.unit === 'month') {
+                targetDate.setMonth(targetDate.getMonth() - range.value);
+            } else if (range.unit === 'year') {
+                targetDate.setFullYear(targetDate.getFullYear() - range.value);
+            }
+            
+            let targetIndex = 0;
+            for (let i = 0; i < dates.length; i++) {
+                const currentDate = new Date(dates[i].replace(/-/g, '/'));
+                if (currentDate >= targetDate) {
+                    targetIndex = i;
+                    break;
+                }
+            }
+            
+            const startPercent = (targetIndex / dates.length) * 100;
+            
+            klineChart.dispatchAction({
+                type: 'dataZoom',
+                start: startPercent,
+                end: 100
+            });
+            
+            // Also update volume chart if it exists
+             if (volumeChart) {
+                volumeChart.dispatchAction({
+                    type: 'dataZoom',
+                    start: startPercent,
+                    end: 100
+                });
+            }
+        };
+
         // 加载可用年份
         const loadYears = async () => {
             try {
@@ -155,10 +215,10 @@ const app = createApp({
                     }
                 },
                 grid: {
-                    left: '10%',
-                    right: '10%',
+                    left: '50px',
+                    right: '20px',
                     bottom: '15%',
-                    top: '15%'
+                    top: '30px'
                 },
                 xAxis: {
                     type: 'category',
@@ -297,10 +357,10 @@ const app = createApp({
                     }
                 },
                 grid: {
-                    left: '10%',
-                    right: '10%',
+                    left: '50px',
+                    right: '20px',
                     bottom: '15%',
-                    top: '15%'
+                    top: '30px'
                 },
                 xAxis: {
                     type: 'category',
@@ -435,7 +495,9 @@ const app = createApp({
             klineChartRef,
             volumeChartRef,
             searchStock,
-            initCharts
+            initCharts,
+            zoomRanges,
+            zoomToRange
         };
     }
 });

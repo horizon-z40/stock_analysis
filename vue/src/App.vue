@@ -7,14 +7,29 @@
         <span class="favorites-count">({{ favoriteStocks.length }})</span>
       </div>
       <div class="favorites-list">
-        <div
-          v-for="stock in favoriteStocks"
-          :key="stock.code"
-          class="favorite-item"
-          @click="selectFavoriteStock(stock.code)"
-        >
-          <span class="favorite-name">{{ stock.name || '-' }}</span>
+        <div v-for="(stocks, category) in groupedFavorites" :key="category" class="favorite-group">
+          <div 
+            v-if="stocks.length > 0" 
+            class="favorite-group-header" 
+            @click="toggleCategory(category)"
+          >
+            <span class="group-arrow" :class="{ 'collapsed': collapsedCategories[category] }">▼</span>
+            <span class="group-title">{{ category }}</span>
+            <span class="group-count">({{ stocks.length }})</span>
+          </div>
+          
+          <div v-show="!collapsedCategories[category]" class="favorite-group-content">
+            <div
+              v-for="stock in stocks"
+              :key="stock.code"
+              class="favorite-item"
+              @click="selectFavoriteStock(stock.code)"
+            >
+              <span class="favorite-name">{{ stock.name || '-' }}</span>
+            </div>
+          </div>
         </div>
+
         <div v-if="favoriteStocks.length === 0" class="favorites-empty">
           暂无自选股票
         </div>
@@ -109,8 +124,8 @@
             <span class="info-label">名称</span>
             <span
               class="info-value code clickable"
-              @click="openEastmoneyStock(stockInfo.stock_code)"
-              :title="'点击查看 ' + stockInfo.stock_code + ' 在东方财富的详情'"
+              @click="openStockDetail(stockInfo.stock_code)"
+              :title="'点击查看 ' + stockInfo.stock_code + ' 的详情'"
             >
               {{ stockBasics?.name || '-' }}
             </span>
@@ -250,7 +265,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 
@@ -291,6 +306,38 @@ const stockBasics = ref(null)
 const peHistory = ref([]) // 存储历史 PE 数据
 const isFavorite = ref(false)
 const favoriteStocks = ref([])
+
+// 自选股分类和折叠
+const collapsedCategories = ref({
+  'A股': false,
+  '港股': true,
+  '美股': true
+})
+
+const toggleCategory = (category) => {
+  collapsedCategories.value[category] = !collapsedCategories.value[category]
+}
+
+const groupedFavorites = computed(() => {
+  const groups = {
+    'A股': [],
+    '港股': [],
+    '美股': []
+  }
+  
+  favoriteStocks.value.forEach(stock => {
+    const code = (stock.code || '').toUpperCase()
+    if (code.endsWith('.HK')) {
+      groups['港股'].push(stock)
+    } else if (code.endsWith('.US')) {
+      groups['美股'].push(stock)
+    } else {
+      groups['A股'].push(stock)
+    }
+  })
+  
+  return groups
+})
 
 // 交易策略相关
 const savedConfig = localStorage.getItem('strategy_config')
@@ -1675,23 +1722,37 @@ const updateChartWithSignals = () => {
   }
 }
 
-// 跳转到东方财富股票页面
-const openEastmoneyStock = (stockCode) => {
+// 跳转到第三方股票详情页面（A股跳转东方财富，港美股跳转富途）
+const openStockDetail = (stockCode) => {
   if (!stockCode) return
   
-  // 东方财富的URL格式：https://quote.eastmoney.com/sz000001.html 或 https://quote.eastmoney.com/sh600000.html
-  let code = stockCode.toUpperCase()
-  let emCode = ''
+  const code = stockCode.toUpperCase()
+  const parts = code.split('.')
+  let url = ''
   
-  if (code.includes('.')) {
-    const [base, suffix] = code.split('.')
-    emCode = (suffix === 'SZ' ? 'sz' : 'sh') + base
+  if (code.endsWith('.SH') || code.endsWith('.SZ')) {
+    // A股：东方财富
+    // 格式：https://quote.eastmoney.com/sz000001.html 或 https://quote.eastmoney.com/sh600000.html
+    const [base, suffix] = parts
+    const emCode = (suffix === 'SZ' ? 'sz' : 'sh') + base
+    url = `https://quote.eastmoney.com/${emCode}.html`
+  } else if (code.endsWith('.HK')) {
+    // 港股：富途
+    // 格式：https://www.futunn.com/stock/700-HK
+    const [base] = parts
+    url = `https://www.futunn.com/stock/${base}-HK`
+  } else if (code.endsWith('.US')) {
+    // 美股：富途
+    // 格式：https://www.futunn.com/stock/AAPL-US
+    // 处理 105.AAPL.US 这种情况
+    const symbol = parts.length >= 3 ? parts[1] : parts[0]
+    url = `https://www.futunn.com/stock/${symbol}-US`
   } else {
-    // 如果没有后缀，简单判断
-    emCode = (code.startsWith('6') ? 'sh' : 'sz') + code
+    // 兜底：东方财富（默认假设是A股）
+    const emCode = (code.startsWith('6') ? 'sh' : 'sz') + code.split('.')[0]
+    url = `https://quote.eastmoney.com/${emCode}.html`
   }
   
-  const url = `https://quote.eastmoney.com/${emCode}.html`
   window.open(url, '_blank')
 }
 
@@ -1726,7 +1787,7 @@ onMounted(async () => {
 }
 
 .favorites-sidebar {
-  width: 100px;
+  width: 120px;
   background: #1a1a1a;
   border-right: 1px solid #333;
   display: flex;
@@ -1759,6 +1820,52 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   padding: 5px;
+}
+
+.favorite-group {
+  margin-bottom: 8px;
+}
+
+.favorite-group-header {
+  padding: 6px 8px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.favorite-group-header:hover {
+  background: #333;
+}
+
+.group-arrow {
+  font-size: 10px;
+  color: #777;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.group-arrow.collapsed {
+  transform: rotate(-90deg);
+}
+
+.group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #bbb;
+}
+
+.group-count {
+  font-size: 11px;
+  color: #666;
+}
+
+.favorite-group-content {
+  padding-left: 2px;
 }
 
 .favorite-item {

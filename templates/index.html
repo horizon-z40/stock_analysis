@@ -39,7 +39,7 @@
                     </div>
                     
                     <div class="stock-info-header" v-if="stockInfo.show" style="display: flex; gap: 12px; align-items: center; font-size: 0.85rem; flex-wrap: wrap;">
-                        <span><strong>代码:</strong> <a href="#" @click.prevent="openEastmoneyStock(stockInfo.code)" style="color: #64b5f6; text-decoration: none;"></a>{{ stockInfo.code }}</a></span>
+                        <span><strong>代码:</strong> <a href="#" @click.prevent="openStockDetail(stockInfo.code)" style="color: #64b5f6; text-decoration: none;">{{ stockInfo.code }}</a></span>
                         <template v-if="stockBasics">
                             <span><strong>名称:</strong> {{ stockBasics.name }}</span>
                             <span><strong>最新价:</strong> {{ formatNumber(stockBasics.price) }}</span>

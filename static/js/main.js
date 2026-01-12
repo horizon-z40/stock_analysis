@@ -498,21 +498,34 @@ const app = createApp({
             }, 5000);
         };
 
-        // 跳转到东方财富股票页面
-        const openEastmoneyStock = (stockCode) => {
+        // 跳转到第三方股票详情页面（A股跳转东方财富，港美股跳转富途）
+        const openStockDetail = (stockCode) => {
             if (!stockCode) return;
             
-            let code = stockCode.toUpperCase();
-            let emCode = '';
+            const code = stockCode.toUpperCase();
+            const parts = code.split('.');
+            let url = '';
             
-            if (code.includes('.')) {
-                const [base, suffix] = code.split('.');
-                emCode = (suffix === 'SZ' ? 'sz' : 'sh') + base;
+            if (code.endsWith('.SH') || code.endsWith('.SZ')) {
+                // A股：东方财富
+                const [base, suffix] = parts;
+                const emCode = (suffix === 'SZ' ? 'sz' : 'sh') + base;
+                url = `https://quote.eastmoney.com/${emCode}.html`;
+            } else if (code.endsWith('.HK')) {
+                // 港股：富途
+                const [base] = parts;
+                url = `https://www.futunn.com/stock/${base}-HK`;
+            } else if (code.endsWith('.US')) {
+                // 美股：富途
+                // 处理 105.AAPL.US 这种情况
+                const symbol = parts.length >= 3 ? parts[1] : parts[0];
+                url = `https://www.futunn.com/stock/${symbol}-US`;
             } else {
-                emCode = (code.startsWith('6') ? 'sh' : 'sz') + code;
+                // 兜底：东方财富
+                const emCode = (code.startsWith('6') ? 'sh' : 'sz') + code.split('.')[0];
+                url = `https://quote.eastmoney.com/${emCode}.html`;
             }
             
-            const url = `https://quote.eastmoney.com/${emCode}.html`;
             window.open(url, '_blank');
         };
 
@@ -557,7 +570,7 @@ const app = createApp({
             zoomToRange,
             formatNumber,
             formatBillion,
-            openEastmoneyStock
+            openStockDetail
         };
     }
 });

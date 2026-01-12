@@ -158,56 +158,77 @@ def normalize_stock_code_with_market(stock_code):
     secid 规则：
       - 深市: 0.代码
       - 沪市: 1.代码
+      - 港股: 116.代码
+      - 美股: 代码 (通常已包含市场前缀如 105.AAPL)
     """
     code = stock_code.upper()
     if '.' in code:
-        base, suffix = code.split('.', 1)
+        parts = code.split('.')
+        base = parts[0]
+        suffix = parts[-1]
     else:
         base, suffix = code, ''
 
     if suffix == 'SZ':
-        market_flag = '0'
+        return f"0.{base}"
     elif suffix == 'SH':
-        market_flag = '1'
+        return f"1.{base}"
+    elif suffix == 'HK':
+        return f"116.{base}"
+    elif suffix == 'US':
+        # 美股代码在 stock_list.json 中存为 "105.AAPL.US"
+        # 实际 API 需要 "105.AAPL"
+        if len(parts) >= 3:
+            return ".".join(parts[:-1])
+        return base # 兜底
     else:
         # 未提供后缀时，根据首位数字简单判断
-        # 沪市一般以6开头，其余视为深市
-        market_flag = '1' if base.startswith('6') else '0'
-
-    return f"{market_flag}.{base}"
+        if len(base) <= 5 and base.isdigit():
+            return f"116.{base}"
+        return f"1.{base}" if base.startswith('6') else f"0.{base}"
 
 def fetch_latest_stock_data_from_ak(stock_code, start_date="20250329", end_date=None):
     """
-    使用 akshare 抓取特定的股票数据
+    使用 akshare 抓取特定的股票数据，支持 A 股、港股和美股
     """
     if ak is None:
         print("未安装 akshare，无法抓取最新数据")
         return None
         
-    # 提取6位代码
-    code = stock_code.split('.')[0]
+    # 提取代码和后缀
+    parts = stock_code.split('.')
+    suffix = parts[-1].upper()
+    
+    # 基础代码（去掉 .US, .SZ, .SH 等）
+    if suffix in ['US', 'SZ', 'SH', 'HK']:
+        code = ".".join(parts[:-1])
+    else:
+        code = stock_code
+    
     try:
-        # 获取历史数据
-        # start_date 格式 YYYYMMDD
-        formatted_start = start_date.replace('-', '')
-        
-        # 如果未指定结束日期，使用今天日期
+        formatted_start = start_date.replace('-', '').replace('/', '')
         if not end_date:
             end_date = datetime.now().strftime('%Y%m%d')
-        formatted_end = end_date.replace('-', '')
+        formatted_end = end_date.replace('-', '').replace('/', '')
         
-        print(f"正在从 akshare 抓取 {code} 的数据，从 {formatted_start} 到 {formatted_end}")
+        print(f"正在从 akshare 抓取 {stock_code} 的数据，从 {formatted_start} 到 {formatted_end}")
         
-        # period="daily", adjust="" (不复权，与本地数据一致)
-        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+        if suffix == 'HK':
+            df = ak.stock_hk_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+        elif suffix == 'US':
+            # 美股接口 symbol 需要带市场标识，如 105.AAPL
+            df = ak.stock_us_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+        else:
+            # A 股
+            # A 股接口 symbol 只需要 6 位代码
+            pure_code = code.split('.')[0]
+            df = ak.stock_zh_a_hist(symbol=pure_code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
         
         if df is None or df.empty:
-            print(f"未获取到 {code} 在该时间段的数据")
+            print(f"未获取到 {stock_code} 在该时间段的数据")
             return None
         
         # 重命名列以匹配本地格式
-        # akshare 返回列名: ['日期', '开盘', '收盘', '最高', '最低', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率']
-        # 本地格式: trade_time,open,close,high,low,vol,amount
         df = df.rename(columns={
             '日期': 'trade_time',
             '开盘': 'open',
@@ -218,18 +239,13 @@ def fetch_latest_stock_data_from_ak(stock_code, start_date="20250329", end_date=
             '成交额': 'amount'
         })
         
-        # 确保列存在并按顺序排列
         df['trade_time'] = pd.to_datetime(df['trade_time'])
-        
-        # 过滤掉不需要的列
         cols = ['trade_time', 'open', 'close', 'high', 'low', 'vol', 'amount']
         df = df[cols]
         
         return df
     except Exception as e:
         print(f"抓取最新数据失败: {e}")
-        import traceback
-        traceback.print_exc()
         return None
 
 @app.route('/')
@@ -411,7 +427,7 @@ def get_stock_info(stock_code):
     url = 'https://push2.eastmoney.com/api/qt/stock/get'
     params = {
         'secid': secid,
-        'fields': 'f43,f57,f58,f116,f162,f163,f167'  # f43最新价, f162市盈率(TTM), f163市盈率(静), f167是市净率(PB)
+        'fields': 'f43,f57,f58,f59,f116,f162,f163,f167'  # f43最新价, f59价格精度, f57代码, f58名称, f116总市值, f162市盈率(TTM), f163市盈率(静), f167是市净率(PB)
     }
 
     try:
@@ -422,19 +438,21 @@ def get_stock_info(stock_code):
         if not data:
             return jsonify({'success': False, 'error': '未获取到基础信息'}), 404
 
-        # 东财接口返回的价格、市盈率和市净率通常需要除以100
-        def safe_div_100(val):
+        # 东财接口返回的价格通常需要根据 f59 字段的精度进行除法转换
+        # 市盈率和市净率通常固定除以 100
+        def safe_div_precision(val, precision):
             if val is None or val == '-' or val == '':
                 return None
             try:
-                # 尝试转换为浮点数
                 f_val = float(val)
-                # 如果值是 0 或非常接近 0，且原始数据是 '-'，返回 None
                 if f_val == 0 and val == '-':
                     return None
-                return f_val / 100.0
+                return f_val / (10 ** precision)
             except (ValueError, TypeError):
                 return None
+
+        def safe_div_100(val):
+            return safe_div_precision(val, 2)
 
         def safe_float(val):
             if val is None or val == '-':
@@ -444,11 +462,14 @@ def get_stock_info(stock_code):
             except (ValueError, TypeError):
                 return None
         
+        # 获取价格精度，默认为 2
+        price_precision = data.get('f59', 2)
+        
         result = {
             'success': True,
             'stock_code': data.get('f57') or stock_code,
             'name': data.get('f58'),
-            'price': safe_div_100(data.get('f43')),
+            'price': safe_div_precision(data.get('f43'), price_precision),
             'market_cap': safe_float(data.get('f116')),  # 总市值（元）
             'pe_ttm': safe_div_100(data.get('f162')),
             'pe_static': safe_div_100(data.get('f163')),
@@ -461,23 +482,42 @@ def get_stock_info(stock_code):
 @app.route('/api/stock_pe/<stock_code>')
 def get_stock_pe_history(stock_code):
     """
-    获取股票历史市盈率 PE-TTM 数据
+    获取股票历史市盈率 PE-TTM 数据，支持 A 股、港股和美股
     """
     if ak is None:
         return jsonify({'success': False, 'error': '未安装 akshare'}), 500
     
-    # 提取6位代码
-    code = stock_code.split('.')[0]
+    # 提取代码和后缀
+    parts = stock_code.split('.')
+    suffix = parts[-1].upper()
+    
+    if suffix in ['US', 'SZ', 'SH', 'HK']:
+        code = ".".join(parts[:-1])
+    else:
+        code = stock_code
+    
     try:
-        print(f"正在从 akshare 抓取 {code} 的历史 PE-TTM 数据")
-        # 获取全部历史 PE-TTM
-        df = ak.stock_zh_valuation_baidu(symbol=code, indicator="市盈率(TTM)", period="全部")
+        print(f"正在从 akshare 抓取 {stock_code} 的历史 PE-TTM 数据")
+        
+        if suffix == 'HK':
+            # 港股历史估值接口
+            df = ak.stock_hk_valuation_baidu(symbol=code, indicator="市盈率(TTM)", period="全部")
+        elif suffix == 'US':
+            # 美股通常通过历史行情计算或使用特定接口
+            # 百度估值接口可能不支持美股，尝试美股估值接口
+            try:
+                # 尝试通过百度估值接口（部分美股支持）
+                df = ak.stock_us_valuation_baidu(symbol=code, indicator="市盈率(TTM)", period="全部")
+            except:
+                return jsonify({'success': False, 'error': '暂不支持该美股的 PE 数据'}), 404
+        else:
+            # A 股历史估值接口
+            pure_code = code.split('.')[0]
+            df = ak.stock_zh_valuation_baidu(symbol=pure_code, indicator="市盈率(TTM)", period="全部")
         
         if df is None or df.empty:
             return jsonify({'success': False, 'error': '未获取到历史 PE 数据'}), 404
         
-        # 转换格式为 [{date: '2023-01-01', value: 15.5}, ...]
-        # akshare 返回列名: ['date', 'value']
         df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
         data_list = df.to_dict('records')
         
@@ -535,7 +575,7 @@ STOCK_LIST_PINYIN_CACHE = {
 
 def load_stock_list_with_pinyin():
     """
-    加载股票列表并缓存拼音字段，避免重复计算
+    加载股票列表并缓存拼音字段，直接从CSV读取预计算好的拼音
     """
     if not os.path.exists(STOCK_LIST_FILE):
         return []
@@ -543,20 +583,32 @@ def load_stock_list_with_pinyin():
     if STOCK_LIST_PINYIN_CACHE['stocks'] is not None and STOCK_LIST_PINYIN_CACHE['mtime'] == mtime:
         return STOCK_LIST_PINYIN_CACHE['stocks']
 
-    df = pd.read_csv(STOCK_LIST_FILE)
-    df['name'] = df['name'].astype(str)
-    df['pinyin'] = df['name'].apply(lambda x: get_pinyin(x).lower().replace(' ', ''))
-    df['pinyin_initials'] = df['name'].apply(lambda x: get_pinyin_initial(x).replace(' ', ''))
-    stocks = df.apply(lambda row: {
-        'code': row['code'],
-        'name': row['name'],
-        'pinyin': row['pinyin'],
-        'pinyin_initials': row['pinyin_initials']
-    }, axis=1).tolist()
+    try:
+        df = pd.read_csv(STOCK_LIST_FILE)
+        # 如果 CSV 中没有拼音列，则手动计算（向下兼容）
+        if 'pinyin' not in df.columns or 'pinyin_initials' not in df.columns:
+            print(f"警告: {STOCK_LIST_FILE} 中缺少拼音列，正在实时计算...")
+            df['name'] = df['name'].astype(str)
+            df['pinyin'] = df['name'].apply(lambda x: get_pinyin(x).lower().replace(' ', ''))
+            df['pinyin_initials'] = df['name'].apply(lambda x: get_pinyin_initial(x).replace(' ', ''))
+        
+        # 填充 NaN
+        df['pinyin'] = df['pinyin'].fillna('')
+        df['pinyin_initials'] = df['pinyin_initials'].fillna('')
+        
+        stocks = df.apply(lambda row: {
+            'code': str(row['code']),
+            'name': str(row['name']),
+            'pinyin': str(row['pinyin']),
+            'pinyin_initials': str(row['pinyin_initials'])
+        }, axis=1).tolist()
 
-    STOCK_LIST_PINYIN_CACHE['stocks'] = stocks
-    STOCK_LIST_PINYIN_CACHE['mtime'] = mtime
-    return stocks
+        STOCK_LIST_PINYIN_CACHE['stocks'] = stocks
+        STOCK_LIST_PINYIN_CACHE['mtime'] = mtime
+        return stocks
+    except Exception as e:
+        print(f"加载股票列表失败: {e}")
+        return []
 
 @app.route('/api/stock_list')
 def get_stock_list():
@@ -595,65 +647,45 @@ def search_stocks():
         })
     
     try:
-        # 读取股票列表文件
-        if not os.path.exists(STOCK_LIST_FILE):
-            return jsonify({
-                'success': False,
-                'error': '股票列表文件不存在'
-            }), 404
-        
-        df = pd.read_csv(STOCK_LIST_FILE)
-        
-        # 将查询词转换为小写（用于拼音匹配），并去除空格
+        # 优先从缓存的列表中搜索，避免重复读取 CSV 和计算
+        all_stocks = load_stock_list_with_pinyin()
+        if not all_stocks:
+            return jsonify({'success': True, 'results': [], 'count': 0})
+
         query_lower = query.lower().replace(' ', '')
         query_upper = query.upper().replace(' ', '')
         query_no_space = query.replace(' ', '')
         
-        # 基础匹配：股票代码和中文名称（忽略名称中的空格）
-        code_mask = df['code'].astype(str).str.contains(query, case=False, na=False)
-        # 匹配时去除公司名称中的空格
-        name_mask = df['name'].astype(str).str.replace(' ', '', regex=False).str.contains(query_no_space, case=False, na=False)
-        
-        # 如果基础匹配已有结果，直接返回（性能优化）
-        basic_mask = code_mask | name_mask
-        if basic_mask.sum() >= limit:
-            results = df[basic_mask].head(limit)
-        else:
-            # 需要拼音匹配，计算所有名称的拼音
-            # 为了提高性能，只对未匹配的行计算拼音
-            unmatched_df = df[~basic_mask].copy()
+        results = []
+        for stock in all_stocks:
+            code = stock['code']
+            name = stock['name'].replace(' ', '')
+            pinyin = stock['pinyin']
+            initials = stock['pinyin_initials']
             
-            if len(unmatched_df) > 0:
-                # 计算拼音全拼和首字母（去除空格）
-                unmatched_df['_pinyin'] = unmatched_df['name'].apply(lambda x: get_pinyin(str(x)).lower().replace(' ', ''))
-                unmatched_df['_pinyin_initials'] = unmatched_df['name'].apply(lambda x: get_pinyin_initial(str(x)).replace(' ', ''))
-                
-                # 拼音匹配（查询词已去除空格）
-                pinyin_mask = unmatched_df['_pinyin'].str.contains(query_lower, na=False)
-                initials_mask = unmatched_df['_pinyin_initials'].str.contains(query_upper, na=False)
-                
-                # 合并所有匹配结果
-                pinyin_matched = unmatched_df[pinyin_mask | initials_mask].drop(columns=['_pinyin', '_pinyin_initials'], errors='ignore')
-                results = pd.concat([df[basic_mask], pinyin_matched]).head(limit)
-            else:
-                results = df[basic_mask].head(limit)
-        
-        # 转换为列表格式
-        stock_list = results.apply(lambda row: {
-            'code': row['code'],
-            'name': row['name']
-        }, axis=1).tolist()
+            # 匹配逻辑：代码包含、名称包含、拼音包含、首字母包含
+            if (query_upper in code.upper() or 
+                query_no_space in name or 
+                query_lower in pinyin or 
+                query_upper in initials):
+                results.append({
+                    'code': stock['code'],
+                    'name': stock['name']
+                })
+                if len(results) >= limit:
+                    break
         
         return jsonify({
             'success': True,
-            'results': stock_list,
-            'count': len(stock_list)
+            'results': results,
+            'count': len(results)
         })
     
     except Exception as e:
+        print(f"搜索股票出错: {e}")
         return jsonify({
             'success': False,
-            'error': f'搜索失败: {str(e)}'
+            'error': f'搜索股票失败: {str(e)}'
         }), 500
 
 def load_favorite_stocks():

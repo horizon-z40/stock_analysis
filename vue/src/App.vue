@@ -888,13 +888,23 @@ const renderChart = (data) => {
         let result = params[0].axisValue + '<br/>'
         params.forEach(param => {
           if (param.seriesName === 'K线') {
-            result += `${param.seriesName}: 开${param.value[0]} 收${param.value[1]} 低${param.value[2]} 高${param.value[3]}<br/>`
+            // ECharts candlestick 在 axis trigger 下，param.value 通常为 [index, open, close, low, high]
+            const val = param.value
+            if (Array.isArray(val) && val.length >= 5) {
+              result += `${param.seriesName}: 开${val[1]} 收${val[2]} 低${val[3]} 高${val[4]}<br/>`
+            } else {
+              // 兜底逻辑
+              result += `${param.seriesName}: 开${val[0]} 收${val[1]} 低${val[2]} 高${val[3]}<br/>`
+            }
           } else if (param.seriesName === '成交量') {
-            result += `${param.seriesName}: ${(param.value / 10000).toFixed(2)}万手<br/>`
+            const val = Array.isArray(param.value) ? param.value[1] : param.value
+            result += `${param.seriesName}: ${(val / 10000).toFixed(2)}万手<br/>`
           } else if (param.seriesName === 'PE-TTM') {
-            result += `${param.seriesName}: ${param.value && param.value !== '-' ? parseFloat(param.value).toFixed(2) : '-'}<br/>`
+            const val = Array.isArray(param.value) ? param.value[1] : param.value
+            result += `${param.seriesName}: ${val && val !== '-' ? parseFloat(val).toFixed(2) : '-'}<br/>`
           } else {
-            result += `${param.seriesName}: ${param.value}<br/>`
+            const val = Array.isArray(param.value) ? param.value[1] : param.value
+            result += `${param.seriesName}: ${val}<br/>`
           }
         })
         return result

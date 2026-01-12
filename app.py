@@ -829,6 +829,18 @@ def check_favorite():
         }), 500
 
 if __name__ == '__main__':
+    import socket
+    
+    def get_local_ip():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return '127.0.0.1'
+
     # 支持通过环境变量或命令行参数指定端口
     port = 8080  # 默认端口
     if 'PORT' in os.environ:
@@ -839,6 +851,11 @@ if __name__ == '__main__':
         except ValueError:
             print(f"警告: 无效的端口号 '{sys.argv[1]}', 使用默认端口 {port}")
     
-    print(f"服务器启动在 http://localhost:{port}")
-    print(f"请在浏览器中访问: http://localhost:{port}")
+    local_ip = get_local_ip()
+    print(f"\n" + "="*50)
+    print(f"服务器已启动！")
+    print(f"本地访问: http://localhost:{port}")
+    print(f"局域网访问: http://{local_ip}:{port}")
+    print(f"="*50 + "\n")
+    
     app.run(debug=True, host='0.0.0.0', port=port)

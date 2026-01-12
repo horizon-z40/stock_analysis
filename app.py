@@ -7,11 +7,19 @@ import sys
 import requests
 import json
 from pypinyin import lazy_pinyin, Style
+try:
+    import akshare as ak
+except ImportError:
+    ak = None
 
 app = Flask(__name__)
 
 # 数据目录
 DATA_DIR = 'data'
+# 远程数据缓存目录
+REMOTE_CACHE_DIR = os.path.join(DATA_DIR, 'remote_cache')
+# 远程数据拉取记录文件
+REMOTE_LOG_FILE = os.path.join(REMOTE_CACHE_DIR, 'fetch_log.json')
 # 股票列表文件
 STOCK_LIST_FILE = 'stock_list.csv'
 # 自选股票文件
@@ -78,9 +86,12 @@ def find_stock_file(stock_code, year=None):
         years = [f"{year}_by_day"]
     else:
         # 查找所有日级年份目录，按降序排列
-        years = sorted([d for d in os.listdir(DATA_DIR) 
-                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.endswith('_by_day')], 
-                      reverse=True)
+        if not os.path.exists(DATA_DIR):
+            years = []
+        else:
+            years = sorted([d for d in os.listdir(DATA_DIR) 
+                           if os.path.isdir(os.path.join(DATA_DIR, d)) and d.endswith('_by_day')], 
+                          reverse=True)
     
     # 遍历年份目录查找文件
     for y_dir in years:
@@ -119,8 +130,11 @@ def find_all_stock_files(stock_code, year=None):
         years = [f"{year}_by_day"]
     else:
         # 查找所有日级年份目录，按升序排列（从早到晚）
-        years = sorted([d for d in os.listdir(DATA_DIR) 
-                       if os.path.isdir(os.path.join(DATA_DIR, d)) and d.endswith('_by_day')])
+        if not os.path.exists(DATA_DIR):
+            years = []
+        else:
+            years = sorted([d for d in os.listdir(DATA_DIR) 
+                           if os.path.isdir(os.path.join(DATA_DIR, d)) and d.endswith('_by_day')])
     
     # 遍历所有年份目录查找文件
     for y_dir in years:
@@ -162,6 +176,62 @@ def normalize_stock_code_with_market(stock_code):
 
     return f"{market_flag}.{base}"
 
+def fetch_latest_stock_data_from_ak(stock_code, start_date="20250329", end_date=None):
+    """
+    使用 akshare 抓取特定的股票数据
+    """
+    if ak is None:
+        print("未安装 akshare，无法抓取最新数据")
+        return None
+        
+    # 提取6位代码
+    code = stock_code.split('.')[0]
+    try:
+        # 获取历史数据
+        # start_date 格式 YYYYMMDD
+        formatted_start = start_date.replace('-', '')
+        
+        # 如果未指定结束日期，使用今天日期
+        if not end_date:
+            end_date = datetime.now().strftime('%Y%m%d')
+        formatted_end = end_date.replace('-', '')
+        
+        print(f"正在从 akshare 抓取 {code} 的数据，从 {formatted_start} 到 {formatted_end}")
+        
+        # period="daily", adjust="" (不复权，与本地数据一致)
+        df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+        
+        if df is None or df.empty:
+            print(f"未获取到 {code} 在该时间段的数据")
+            return None
+        
+        # 重命名列以匹配本地格式
+        # akshare 返回列名: ['日期', '开盘', '收盘', '最高', '最低', '成交量', '成交额', '振幅', '涨跌幅', '涨跌额', '换手率']
+        # 本地格式: trade_time,open,close,high,low,vol,amount
+        df = df.rename(columns={
+            '日期': 'trade_time',
+            '开盘': 'open',
+            '收盘': 'close',
+            '最高': 'high',
+            '最低': 'low',
+            '成交量': 'vol',
+            '成交额': 'amount'
+        })
+        
+        # 确保列存在并按顺序排列
+        df['trade_time'] = pd.to_datetime(df['trade_time'])
+        
+        # 过滤掉不需要的列
+        cols = ['trade_time', 'open', 'close', 'high', 'low', 'vol', 'amount']
+        df = df[cols]
+        
+        return df
+    except Exception as e:
+        print(f"抓取最新数据失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 @app.route('/')
 def index():
     """主页面"""
@@ -175,6 +245,7 @@ def get_stock_data(stock_code):
     - stock_code: 股票代码，如 "000001.SZ" 或 "000001"
     - year: 可选，年份，如 "2025"
     - period: 可选，时间周期，如 "day", "week", "month"，默认为 "day"
+    - fetch_latest: 可选，是否抓取最新数据 (2025-03-29之后)
     """
     year = request.args.get('year', None)
     if year:
@@ -187,10 +258,13 @@ def get_stock_data(stock_code):
     if period not in ['day', 'week', 'month']:
         period = 'day'
     
-    # 查找所有年份的文件
-    files = find_all_stock_files(stock_code, year)
+    fill_missing_data = request.args.get('fill_missing_data', 'false').lower() == 'true'
+    remote_data = request.args.get('remote_data', 'false').lower() == 'true'
     
-    if not files:
+    # 查找所有年份的文件
+    files = [] if remote_data else find_all_stock_files(stock_code, year)
+    
+    if not files and not fill_missing_data and not remote_data:
         return jsonify({
             'success': False,
             'error': f'未找到股票代码 {stock_code} 的数据'
@@ -201,11 +275,83 @@ def get_stock_data(stock_code):
         dfs = []
         years_found = []
         
-        for file_path, file_year in files:
-            df_year = pd.read_csv(file_path)
-            dfs.append(df_year)
-            years_found.append(file_year)
+        if not remote_data:
+            for file_path, file_year in files:
+                df_year = pd.read_csv(file_path)
+                dfs.append(df_year)
+                years_found.append(file_year)
+        else:
+            # 远程数据缓存逻辑
+            today = datetime.now().strftime('%Y-%m-%d')
+            cache_file = os.path.join(REMOTE_CACHE_DIR, f"{stock_code}_remote.csv")
+            
+            # 检查是否有缓存记录
+            fetch_log = {}
+            if os.path.exists(REMOTE_LOG_FILE):
+                try:
+                    with open(REMOTE_LOG_FILE, 'r') as f:
+                        fetch_log = json.load(f)
+                except:
+                    fetch_log = {}
+            
+            # 判断是否需要重新拉取
+            last_fetch_date = fetch_log.get(stock_code)
+            if last_fetch_date == today and os.path.exists(cache_file):
+                print(f"远程数据日期未变 ({today})，直接从本地缓存读取: {stock_code}")
+                df_remote = pd.read_csv(cache_file)
+                dfs.append(df_remote)
+                years_found.append("2018_now_remote_cached")
+            else:
+                print(f"尝试从远程抓取 2018 至今的数据: {stock_code}")
+                # 2018-01-01 至今
+                fetch_end_date = datetime.now().strftime('%Y%m%d')
+                df_remote = fetch_latest_stock_data_from_ak(stock_code, start_date="20180101", end_date=fetch_end_date)
+                if df_remote is not None and not df_remote.empty:
+                    print(f"成功抓取远程数据，共 {len(df_remote)} 条，保存至缓存")
+                    # 创建目录
+                    os.makedirs(REMOTE_CACHE_DIR, exist_ok=True)
+                    # 保存到本地缓存
+                    df_remote.to_csv(cache_file, index=False)
+                    # 更新拉取日志
+                    fetch_log[stock_code] = today
+                    with open(REMOTE_LOG_FILE, 'w') as f:
+                        json.dump(fetch_log, f)
+                    
+                    dfs.append(df_remote)
+                    years_found.append("2018_now_remote")
+                else:
+                    print(f"抓取远程数据失败或为空: {stock_code}")
+                    # 如果抓取失败但本地有旧缓存，则先用旧缓存
+                    if os.path.exists(cache_file):
+                        print(f"远程抓取失败，回退使用旧缓存数据: {stock_code}")
+                        df_remote = pd.read_csv(cache_file)
+                        dfs.append(df_remote)
+                        years_found.append("2018_now_remote_cached_fallback")
         
+        # 如果需要补齐缺失数据
+        if fill_missing_data and not remote_data:
+            # 1. 尝试补齐 2024 年数据 (2024-06-29至2024-12-31)
+            print(f"尝试补齐 2024 年数据: {stock_code}")
+            df_2024 = fetch_latest_stock_data_from_ak(stock_code, start_date="20240629", end_date="20241231")
+            if df_2024 is not None and not df_2024.empty:
+                print(f"成功补齐 2024 年数据，共 {len(df_2024)} 条")
+                dfs.append(df_2024)
+                years_found.append("2024_fill")
+            
+            # 2. 尝试抓取 2025 年至今的数据
+            print(f"尝试抓取最新数据: {stock_code}")
+            df_latest = fetch_latest_stock_data_from_ak(stock_code, "2025-03-29")
+            if df_latest is not None and not df_latest.empty:
+                print(f"成功抓取到最新数据，共 {len(df_latest)} 条，最新日期: {df_latest['trade_time'].max()}")
+                dfs.append(df_latest)
+                years_found.append("2025+")
+        
+        if not dfs:
+            return jsonify({
+                'success': False,
+                'error': f'未找到股票代码 {stock_code} 的数据'
+            }), 404
+            
         # 合并所有数据
         df = pd.concat(dfs, ignore_index=True)
         
@@ -215,7 +361,7 @@ def get_stock_data(stock_code):
         # 按时间排序
         df = df.sort_values('trade_time')
         
-        # 去除重复数据（如果有）
+        # 去重（防止补齐数据与本地数据重叠）
         df = df.drop_duplicates(subset=['trade_time'], keep='first')
         
         # 根据周期聚合数据
@@ -237,6 +383,8 @@ def get_stock_data(stock_code):
         return jsonify(data)
     
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': f'读取数据时出错: {str(e)}'
@@ -309,6 +457,39 @@ def get_stock_info(stock_code):
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': f'获取基础信息失败: {str(e)}'}), 500
+
+@app.route('/api/stock_pe/<stock_code>')
+def get_stock_pe_history(stock_code):
+    """
+    获取股票历史市盈率 PE-TTM 数据
+    """
+    if ak is None:
+        return jsonify({'success': False, 'error': '未安装 akshare'}), 500
+    
+    # 提取6位代码
+    code = stock_code.split('.')[0]
+    try:
+        print(f"正在从 akshare 抓取 {code} 的历史 PE-TTM 数据")
+        # 获取全部历史 PE-TTM
+        df = ak.stock_zh_valuation_baidu(symbol=code, indicator="市盈率(TTM)", period="全部")
+        
+        if df is None or df.empty:
+            return jsonify({'success': False, 'error': '未获取到历史 PE 数据'}), 404
+        
+        # 转换格式为 [{date: '2023-01-01', value: 15.5}, ...]
+        # akshare 返回列名: ['date', 'value']
+        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+        data_list = df.to_dict('records')
+        
+        return jsonify({
+            'success': True,
+            'stock_code': stock_code,
+            'data': data_list,
+            'count': len(data_list)
+        })
+    except Exception as e:
+        print(f"获取历史 PE 失败: {e}")
+        return jsonify({'success': False, 'error': f'获取历史 PE 失败: {str(e)}'}), 500
 
 @app.route('/api/stocks/<year>')
 def get_stocks_by_year(year):

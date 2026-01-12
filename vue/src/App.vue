@@ -55,6 +55,18 @@
             </div>
           </div>
           <button @click="loadStockData" class="search-btn">查询</button>
+          
+          <!-- 数据补齐勾选框 -->
+          <div class="fetch-latest-wrapper">
+            <label class="checkbox-label disabled-label" title="该功能暂不可用">
+              <input type="checkbox" v-model="fillMissingData" disabled />
+              补齐缺失数据
+            </label>
+            <label class="checkbox-label" style="margin-left: 15px;">
+              <input type="checkbox" v-model="remoteData" />
+              远程数据(2018至今)
+            </label>
+          </div>
         </div>
         
         <div class="period-section">
@@ -200,6 +212,10 @@
         <div class="strategy-section" v-if="evaluationResult">
           <div class="section-title">策略效果评估</div>
           <div class="evaluation-grid">
+            <div class="eval-item" v-if="evaluationResult.strategyProfit !== undefined">
+              <span class="eval-label">策略实际收益率</span>
+              <span class="eval-value" :class="getProfitClass(evaluationResult.strategyProfit)">{{ formatValue(evaluationResult.strategyProfit) }}</span>
+            </div>
             <div class="eval-item">
               <span class="eval-label">最大收益率</span>
               <span class="eval-value" :class="getProfitClass(evaluationResult.maxProfit)">{{ formatValue(evaluationResult.maxProfit) }}</span>
@@ -238,9 +254,33 @@ import { ref, onMounted, watch, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 
-const stockCode = ref('000001.SZ')
-const searchQuery = ref('000001.SZ')
-const currentPeriod = ref('day')
+const stockCode = ref('')
+const searchQuery = ref('')
+const currentPeriod = ref(localStorage.getItem('current_period') || 'day')
+const fillMissingData = ref(localStorage.getItem('fill_missing_data') === 'true')
+const remoteData = ref(localStorage.getItem('remote_data') === 'true')
+
+// 监听周期变化并保存到本地
+watch(currentPeriod, (newVal) => {
+  localStorage.setItem('current_period', newVal)
+})
+
+// 监听补齐缺失数据变化并保存到本地
+watch(fillMissingData, (newVal) => {
+  localStorage.setItem('fill_missing_data', newVal)
+  if (stockCode.value) {
+    loadStockData()
+  }
+})
+
+// 监听远程数据变化并保存到本地
+watch(remoteData, (newVal) => {
+  localStorage.setItem('remote_data', newVal)
+  if (stockCode.value) {
+    loadStockData()
+  }
+})
+
 const loading = ref(false)
 const error = ref('')
 const chartRef = ref(null)
@@ -248,11 +288,13 @@ let chartInstance = null
 
 const stockInfo = ref(null)
 const stockBasics = ref(null)
+const peHistory = ref([]) // 存储历史 PE 数据
 const isFavorite = ref(false)
 const favoriteStocks = ref([])
 
 // 交易策略相关
-const strategyConfig = ref({
+const savedConfig = localStorage.getItem('strategy_config')
+const strategyConfig = ref(savedConfig ? JSON.parse(savedConfig) : {
   buyStart: '20210101',
   buyEnd: '20221231',
   sellStart: '20230101',
@@ -264,10 +306,40 @@ const availableStrategies = [
     id: 'trend',
     name: '趋势交易策略',
     description: '买入：20日均线 > 60日均线，股价站上60日均线 ≥ 5个交易日。'
+  },
+  {
+    id: 'smart_oversold',
+    name: '智能抄底回升策略',
+    description: '通过2021-2023年历史数据回测优化。逻辑：在2021-2022年寻找极度超跌机会（20日跌幅>20%且偏离60日线>10%），在2023年价值回归至60日线时获利了结。'
+  },
+  {
+    id: 'turtle',
+    name: '海龟交易法则',
+    description: '经典趋势跟随策略。买入：股价创20日新高；卖出：股价跌破10日新低。'
+  },
+  {
+    id: 'mean_reversion',
+    name: '均值回归策略',
+    description: '反向交易策略。买入：股价偏离20日均线下方2倍标准差(布林线下轨)；卖出：股价回升至20日均线。'
   }
 ]
 
-const selectedStrategyId = ref(null)
+const selectedStrategyId = ref(localStorage.getItem('selected_strategy_id') || null)
+
+// 监听策略配置变化并保存到本地
+watch(strategyConfig, (newVal) => {
+  localStorage.setItem('strategy_config', JSON.stringify(newVal))
+}, { deep: true })
+
+// 监听选中的策略变化并保存到本地
+watch(selectedStrategyId, (newVal) => {
+  if (newVal) {
+    localStorage.setItem('selected_strategy_id', newVal)
+  } else {
+    localStorage.removeItem('selected_strategy_id')
+  }
+})
+
 const evaluationResult = ref(null)
 const tradingSignals = ref([]) // 存储 B/S 信号
 const strategyLogs = ref([]) // 策略运行日志
@@ -543,7 +615,7 @@ const handleInputBlur = () => {
 // 选择股票
 const selectStock = (item) => {
   stockCode.value = item.code
-  searchQuery.value = item.code
+  searchQuery.value = ''
   searchSuggestions.value = []
   showSuggestions.value = false
   loadStockData()
@@ -557,6 +629,7 @@ const handleSearchEnter = () => {
   } else if (searchQuery.value.trim()) {
     // 否则直接使用输入的内容作为股票代码
     stockCode.value = searchQuery.value.trim()
+    searchQuery.value = ''
     showSuggestions.value = false
     loadStockData()
   }
@@ -572,11 +645,6 @@ const selectPeriod = (period) => {
 
 // 加载股票数据
 const loadStockData = async () => {
-  // 如果stockCode有值但searchQuery为空，同步searchQuery
-  if (stockCode.value && !searchQuery.value) {
-    searchQuery.value = stockCode.value
-  }
-  
   if (!stockCode.value.trim()) {
     error.value = '请输入股票代码'
     loading.value = false
@@ -585,6 +653,7 @@ const loadStockData = async () => {
 
   loading.value = true
   error.value = ''
+  peHistory.value = [] // 切换股票时重置历史 PE 数据
   
   try {
     // 确保图表已初始化
@@ -597,10 +666,12 @@ const loadStockData = async () => {
       }
     }
     
-    console.log(`正在加载股票数据: ${stockCode.value}, 周期: ${currentPeriod.value}`)
+    console.log(`正在加载股票数据: ${stockCode.value}, 周期: ${currentPeriod.value}, 补齐缺失: ${fillMissingData.value}, 远程数据: ${remoteData.value}`)
     const response = await axios.get(`/api/stock/${stockCode.value}`, {
       params: {
-        period: currentPeriod.value
+        period: currentPeriod.value,
+        fill_missing_data: fillMissingData.value ? 'true' : 'false',
+        remote_data: remoteData.value ? 'true' : 'false'
       },
       timeout: 30000 // 30秒超时
     })
@@ -611,12 +682,19 @@ const loadStockData = async () => {
       stockInfo.value = {
         stock_code: response.data.stock_code,
         year: response.data.year,
-        count: response.data.count
+        count: response.data.count,
+        data: response.data.data
       }
       await nextTick() // 等待DOM更新
       renderChart(response.data.data)
       fetchStockInfo(stockCode.value) // 异步获取公司基本面
+      fetchPEHistory(stockCode.value) // 异步获取历史 PE 趋势
       checkFavoriteStatus(stockCode.value) // 检查自选状态
+
+      // 如果当前已选择策略，则自动执行回测
+      if (selectedStrategyId.value) {
+        runStrategy()
+      }
     } else {
       error.value = response.data.error || '加载失败'
       loading.value = false
@@ -640,6 +718,9 @@ const loadStockData = async () => {
 const fetchStockInfo = async (code) => {
   try {
     const resp = await axios.get(`/api/stock_info/${code}`, { timeout: 8000 })
+    // 检查代码是否匹配
+    if (code !== stockCode.value) return
+    
     if (resp.data?.success) {
       stockBasics.value = {
         name: resp.data.name,
@@ -654,8 +735,35 @@ const fetchStockInfo = async (code) => {
       console.warn(resp.data?.error || '未获取到公司信息')
     }
   } catch (e) {
+    // 检查代码是否匹配
+    if (code !== stockCode.value) return
     stockBasics.value = null
     console.warn('获取公司信息失败', e)
+  }
+}
+
+// 获取历史 PE 数据
+const fetchPEHistory = async (code) => {
+  try {
+    const resp = await axios.get(`/api/stock_pe/${code}`, { timeout: 15000 })
+    // 检查代码是否匹配，防止竞态条件
+    if (code !== stockCode.value) return
+    
+    if (resp.data?.success) {
+      peHistory.value = resp.data.data
+      // 重新渲染图表以包含 PE 趋势
+      if (stockInfo.value && stockInfo.value.data) {
+        renderChart(stockInfo.value.data)
+      }
+    } else {
+      peHistory.value = []
+      console.warn(resp.data?.error || '未获取到历史 PE 数据')
+    }
+  } catch (e) {
+    // 检查代码是否匹配
+    if (code !== stockCode.value) return
+    peHistory.value = []
+    console.warn('获取历史 PE 数据失败', e)
   }
 }
 
@@ -686,6 +794,24 @@ const renderChart = (data) => {
   // 成交量数据
   const volumes = data.map(item => parseFloat(item.vol))
   
+  // 准备 PE 数据，需要对齐 K 线日期
+  // peHistory 格式: [{date: '2023-01-01', value: 15.5}, ...]
+  const peMap = {}
+  peHistory.value.forEach(item => {
+    peMap[item.date] = item.value
+  })
+  
+  // 填充 PE 数据，如果某天没有 PE 数据，则寻找最近的前一天数据
+  const peTrend = []
+  let lastPe = null
+  dates.forEach(dateTime => {
+    const dateOnly = dateTime.split(' ')[0]
+    if (peMap[dateOnly] !== undefined) {
+      lastPe = peMap[dateOnly]
+    }
+    peTrend.push(lastPe)
+  })
+  
   // 计算MA5、MA20和MA60
   const ma5 = calculateMA(5, data)
   const ma20 = calculateMA(20, data)
@@ -695,7 +821,7 @@ const renderChart = (data) => {
     backgroundColor: 'transparent',
     animation: false,
     legend: {
-      data: ['K线', 'MA5', 'MA20', 'MA60', '成交量'],
+      data: ['K线', 'MA5', 'MA20', 'MA60', '成交量', 'PE-TTM'],
       textStyle: {
         color: '#e0e0e0'
       },
@@ -718,6 +844,8 @@ const renderChart = (data) => {
             result += `${param.seriesName}: 开${param.value[0]} 收${param.value[1]} 低${param.value[2]} 高${param.value[3]}<br/>`
           } else if (param.seriesName === '成交量') {
             result += `${param.seriesName}: ${(param.value / 10000).toFixed(2)}万手<br/>`
+          } else if (param.seriesName === 'PE-TTM') {
+            result += `${param.seriesName}: ${param.value && param.value !== '-' ? parseFloat(param.value).toFixed(2) : '-'}<br/>`
           } else {
             result += `${param.seriesName}: ${param.value}<br/>`
           }
@@ -729,14 +857,20 @@ const renderChart = (data) => {
       {
         left: '50px',
         right: '20px',
-        top: '30px',
-        height: '70%'
+        top: '40px',
+        height: '52%'
       },
       {
         left: '50px',
         right: '20px',
-        top: '72%',
-        height: '15%'
+        top: '65%',
+        height: '12%'
+      },
+      {
+        left: '50px',
+        right: '20px',
+        top: '80%',
+        height: '12%'
       }
     ],
     xAxis: [
@@ -759,6 +893,19 @@ const renderChart = (data) => {
       {
         type: 'category',
         gridIndex: 1,
+        data: dates,
+        scale: true,
+        boundaryGap: false,
+        axisLine: { onZero: false },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: { show: false },
+        min: 'dataMin',
+        max: 'dataMax'
+      },
+      {
+        type: 'category',
+        gridIndex: 2,
         data: dates,
         scale: true,
         boundaryGap: false,
@@ -797,18 +944,27 @@ const renderChart = (data) => {
         axisLine: { show: false },
         axisTick: { show: false },
         splitLine: { show: false }
+      },
+      {
+        scale: true,
+        gridIndex: 2,
+        splitNumber: 2,
+        axisLabel: { color: '#999', fontSize: 10 },
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { show: false }
       }
     ],
     dataZoom: [
       {
         type: 'inside',
-        xAxisIndex: [0, 1],
+        xAxisIndex: [0, 1, 2],
         start: 0,
         end: 100
       },
       {
         show: true,
-        xAxisIndex: [0, 1],
+        xAxisIndex: [0, 1, 2],
         type: 'slider',
         top: '95%',
         start: 0,
@@ -899,6 +1055,26 @@ const renderChart = (data) => {
             const prevClose = klineData[dataIndex - 1][1]
             return currentClose >= prevClose ? '#26a69a' : '#ef5350'
           }
+        }
+      },
+      {
+        name: 'PE-TTM',
+        type: 'line',
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        data: peTrend,
+        smooth: true,
+        itemStyle: { color: '#00bcd4' },
+        lineStyle: {
+          width: 1.5,
+          color: '#00bcd4'
+        },
+        symbol: 'none',
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(0, 188, 212, 0.3)' },
+            { offset: 1, color: 'rgba(0, 188, 212, 0)' }
+          ])
         }
       }
     ]
@@ -1005,7 +1181,7 @@ const toggleFavorite = async () => {
 // 选择自选股票
 const selectFavoriteStock = (code) => {
   stockCode.value = code
-  searchQuery.value = code
+  searchQuery.value = ''
   loadStockData()
 }
 
@@ -1035,7 +1211,6 @@ const runStrategy = () => {
   const dates = option.xAxis[0].data
   const klineSeries = option.series.find(s => s.name === 'K线')
   const seriesData = klineSeries.data
-  const volumes = option.series.find(s => s.name === '成交量').data
   const ma20 = option.series.find(s => s.name === 'MA20').data
   const ma60 = option.series.find(s => s.name === 'MA60').data
   
@@ -1054,6 +1229,15 @@ const runStrategy = () => {
   const buyEnd = formatDate(strategyConfig.value.buyEnd)
   const sellStart = formatDate(strategyConfig.value.sellStart)
   const sellEnd = formatDate(strategyConfig.value.sellEnd)
+
+  const getMedianRate = (rates) => {
+    if (rates.length === 0) return 0
+    const sortedRates = [...rates].sort((a, b) => a - b)
+    const midIndex = Math.floor(sortedRates.length / 2)
+    return sortedRates.length % 2 === 0
+      ? (sortedRates[midIndex - 1] + sortedRates[midIndex]) / 2
+      : sortedRates[midIndex]
+  }
 
   addLog(`配置参数: 买入窗口(${buyStart} 至 ${buyEnd}), 卖出窗口(${sellStart} 至 ${sellEnd})`, 'info')
 
@@ -1107,15 +1291,6 @@ const runStrategy = () => {
       addLog(`买入窗口内未触发买入信号，仅用于标注展示`, 'info')
     }
 
-    const getMedianRate = (rates) => {
-      if (rates.length === 0) return 0
-      const sortedRates = [...rates].sort((a, b) => a - b)
-      const midIndex = Math.floor(sortedRates.length / 2)
-      return sortedRates.length % 2 === 0
-        ? (sortedRates[midIndex - 1] + sortedRates[midIndex]) / 2
-        : sortedRates[midIndex]
-    }
-
     let maxProfit30d = 0
     let medianProfit30d = 0
     if (buySignalIndex >= 0 && buySignalPrice > 0) {
@@ -1156,6 +1331,204 @@ const runStrategy = () => {
         medianProfit30d: 0
       }
       addLog(`策略执行完毕，买入或卖出窗口无有效交易日`, 'info')
+    }
+  } else if (selectedStrategyId.value === 'smart_oversold') {
+    let holdPrice = 0
+    
+    // 1. 查找第一个符合买入条件的日期
+    for (let i = 60; i < dates.length; i++) {
+      const date = dates[i]
+      const close = seriesData[i][1]
+      
+      if (date >= buyStart && date <= buyEnd && holdPrice === 0) {
+        const prev20Close = seriesData[i - 20][1]
+        const currentMA60 = parseFloat(ma60[i])
+        
+        // 买入：20日内跌幅 > 20% 且低于60日线10%
+        if (close < prev20Close * 0.8 && close < currentMA60 * 0.9) {
+          holdPrice = close
+          buySignalIndex = i
+          buySignalPrice = close
+          const buyPrice = parseFloat(seriesData[i][3])
+          signals.push({ index: i, type: 'B', price: buyPrice, date: date })
+          addLog(`${date}: [买入] 触发超跌信号，买入价格 ${holdPrice.toFixed(2)}`, 'buy')
+          break
+        }
+      }
+    }
+
+    // 2. 查找卖出信号 (2023年回归60日线)
+    let sellSignalPrice = 0
+    if (holdPrice > 0) {
+      for (let i = buySignalIndex + 1; i < dates.length; i++) {
+        const date = dates[i]
+        const close = seriesData[i][1]
+        const currentMA60 = parseFloat(ma60[i])
+        
+        if (date >= sellStart && date <= sellEnd) {
+          if (close >= currentMA60) {
+            sellSignalPrice = close
+            const sellPrice = parseFloat(seriesData[i][3])
+            signals.push({ index: i, type: 'S', price: sellPrice, date: date })
+            addLog(`${date}: [卖出] 股价回归60日线，卖出价格 ${close.toFixed(2)}`, 'sell')
+            break
+          }
+        }
+      }
+    }
+
+    if (holdPrice === 0) {
+      addLog(`买入窗口内未触发超跌信号`, 'info')
+    }
+
+    // 计算收益率 (复用逻辑)
+    let maxProfit30d = 0
+    let medianProfit30d = 0
+    if (buySignalIndex >= 0 && buySignalPrice > 0) {
+      const rates30d = []
+      let counted = 0
+      for (let i = buySignalIndex; i < dates.length && counted < 30; i++) {
+        const close = seriesData[i][1]
+        rates30d.push(((close - buySignalPrice) / buySignalPrice) * 100)
+        counted += 1
+      }
+      if (rates30d.length > 0) {
+        maxProfit30d = Math.max(...rates30d)
+        medianProfit30d = getMedianRate(rates30d)
+      }
+    }
+
+    if (buySignalPrice > 0 && sellWindowPrices.length > 0) {
+      const yieldRates = sellWindowPrices.map(price => ((price - buySignalPrice) / buySignalPrice) * 100)
+      const medianRate = getMedianRate(yieldRates)
+      const maxSellPrice = Math.max(...sellWindowPrices)
+      const minSellPrice = Math.min(...sellWindowPrices)
+
+      evaluationResult.value = {
+        strategyProfit: sellSignalPrice > 0 ? ((sellSignalPrice - buySignalPrice) / buySignalPrice) * 100 : undefined,
+        maxProfit: ((maxSellPrice - buySignalPrice) / buySignalPrice) * 100,
+        minProfit: ((minSellPrice - buySignalPrice) / buySignalPrice) * 100,
+        medianProfit: medianRate,
+        maxProfit30d,
+        medianProfit30d
+      }
+      addLog(`策略执行完毕，买入价格 ${buySignalPrice.toFixed(2)}，卖出窗口交易日 ${sellWindowPrices.length} 个`, 'info')
+      if (sellSignalPrice > 0) {
+        addLog(`策略实际收益率: ${evaluationResult.value.strategyProfit.toFixed(2)}%`, 'info')
+      }
+    } else {
+      evaluationResult.value = {
+        strategyProfit: 0,
+        maxProfit: 0,
+        minProfit: 0,
+        medianProfit: 0,
+        maxProfit30d: 0,
+        medianProfit30d: 0
+      }
+    }
+  } else if (selectedStrategyId.value === 'turtle') {
+    let holdPrice = 0
+    let sellSignalPrice = 0
+
+    // 海龟交易法则逻辑
+    for (let i = 20; i < dates.length; i++) {
+      const date = dates[i]
+      const close = seriesData[i][1]
+      
+      // 计算前20日最高价和前10日最低价
+      const prev20Data = seriesData.slice(i - 20, i).map(d => d[1])
+      const high20 = Math.max(...prev20Data)
+      const prev10Data = seriesData.slice(i - 10, i).map(d => d[1])
+      const low10 = Math.min(...prev10Data)
+
+      if (date >= buyStart && date <= buyEnd && holdPrice === 0) {
+        // 买入：创20日新高
+        if (close > high20) {
+          holdPrice = close
+          buySignalIndex = i
+          buySignalPrice = close
+          const buyPrice = parseFloat(seriesData[i][3])
+          signals.push({ index: i, type: 'B', price: buyPrice, date: date })
+          addLog(`${date}: [买入] 海龟法则：突破20日新高 ${high20.toFixed(2)}，买入价格 ${holdPrice.toFixed(2)}`, 'buy')
+        }
+      } else if (holdPrice > 0 && date >= sellStart && date <= sellEnd) {
+        // 卖出：跌破10日新低
+        if (close < low10) {
+          sellSignalPrice = close
+          const sellPrice = parseFloat(seriesData[i][3])
+          signals.push({ index: i, type: 'S', price: sellPrice, date: date })
+          addLog(`${date}: [卖出] 海龟法则：跌破10日新低 ${low10.toFixed(2)}，卖出价格 ${close.toFixed(2)}`, 'sell')
+          break
+        }
+      }
+    }
+
+    // 计算收益统计 (复用逻辑)
+    if (buySignalPrice > 0 && sellWindowPrices.length > 0) {
+      const yieldRates = sellWindowPrices.map(price => ((price - buySignalPrice) / buySignalPrice) * 100)
+      const medianRate = getMedianRate(yieldRates)
+      const maxSellPrice = Math.max(...sellWindowPrices)
+      const minSellPrice = Math.min(...sellWindowPrices)
+
+      evaluationResult.value = {
+        strategyProfit: sellSignalPrice > 0 ? ((sellSignalPrice - buySignalPrice) / buySignalPrice) * 100 : undefined,
+        maxProfit: ((maxSellPrice - buySignalPrice) / buySignalPrice) * 100,
+        minProfit: ((minSellPrice - buySignalPrice) / buySignalPrice) * 100,
+        medianProfit: medianRate,
+        maxProfit30d: 0,
+        medianProfit30d: 0
+      }
+      addLog(`策略执行完毕，买入价格 ${buySignalPrice.toFixed(2)}`, 'info')
+    }
+  } else if (selectedStrategyId.value === 'mean_reversion') {
+    let holdPrice = 0
+    let sellSignalPrice = 0
+
+    // 均值回归策略逻辑 (使用布林线概念)
+    for (let i = 20; i < dates.length; i++) {
+      const date = dates[i]
+      const close = seriesData[i][1]
+      const currentMA20 = parseFloat(ma20[i])
+      
+      // 计算20日标准差
+      const prev20Data = seriesData.slice(i - 20, i).map(d => d[1])
+      const mean = prev20Data.reduce((a, b) => a + b) / 20
+      const stdDev = Math.sqrt(prev20Data.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / 20)
+      const lowerBand = currentMA20 - 2 * stdDev
+
+      if (date >= buyStart && date <= buyEnd && holdPrice === 0) {
+        // 买入：触及布林线下轨 (低于均线2倍标准差)
+        if (close < lowerBand) {
+          holdPrice = close
+          buySignalIndex = i
+          buySignalPrice = close
+          const buyPrice = parseFloat(seriesData[i][3])
+          signals.push({ index: i, type: 'B', price: buyPrice, date: date })
+          addLog(`${date}: [买入] 均值回归：触及布林线下轨 ${lowerBand.toFixed(2)}，买入价格 ${holdPrice.toFixed(2)}`, 'buy')
+        }
+      } else if (holdPrice > 0 && date >= sellStart && date <= sellEnd) {
+        // 卖出：回归至均线
+        if (close >= currentMA20) {
+          sellSignalPrice = close
+          const sellPrice = parseFloat(seriesData[i][3])
+          signals.push({ index: i, type: 'S', price: sellPrice, date: date })
+          addLog(`${date}: [卖出] 均值回归：回归20日均线 ${currentMA20.toFixed(2)}，卖出价格 ${close.toFixed(2)}`, 'sell')
+          break
+        }
+      }
+    }
+
+    // 计算收益统计 (复用逻辑)
+    if (buySignalPrice > 0 && sellWindowPrices.length > 0) {
+      const yieldRates = sellWindowPrices.map(price => ((price - buySignalPrice) / buySignalPrice) * 100)
+      evaluationResult.value = {
+        strategyProfit: sellSignalPrice > 0 ? ((sellSignalPrice - buySignalPrice) / buySignalPrice) * 100 : undefined,
+        maxProfit: yieldRates.length > 0 ? Math.max(...yieldRates) : 0,
+        minProfit: yieldRates.length > 0 ? Math.min(...yieldRates) : 0,
+        medianProfit: getMedianRate(yieldRates),
+        maxProfit30d: 0,
+        medianProfit30d: 0
+      }
     }
   }
   
@@ -1327,7 +1700,17 @@ onMounted(async () => {
   await loadLocalStockList()
   // 加载自选股票列表
   await loadFavoriteStocks()
-  // 默认加载000001.SZ的数据
+  
+  // 启动时默认展示自选第一的股票，如果没有自选则展示平安银行
+  if (favoriteStocks.value.length > 0) {
+    stockCode.value = favoriteStocks.value[0].code
+  } else {
+    stockCode.value = '000001.SZ'
+  }
+  
+  // 确保搜索框清空
+  searchQuery.value = ''
+  
   await loadStockData()
 })
 </script>
@@ -1421,14 +1804,14 @@ onMounted(async () => {
 }
 
 .toolbar {
-  padding: 6px 12px;
+  padding: 2px 8px;
   background: #252525;
   border-bottom: 1px solid #333;
   display: block;
   overflow: visible;
   position: relative;
   z-index: 9999;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
 .toolbar-scroll {
@@ -1454,13 +1837,13 @@ onMounted(async () => {
 }
 
 .stock-input {
-  padding: 6px 10px;
+  padding: 3px 6px;
   background: #1a1a1a;
   border: 1px solid #444;
   border-radius: 4px;
   color: #e0e0e0;
-  font-size: 12px;
-  width: 140px;
+  font-size: 11px;
+  width: 130px;
   outline: none;
   transition: border-color 0.3s;
 }
@@ -1517,18 +1900,48 @@ onMounted(async () => {
 }
 
 .search-btn {
-  padding: 6px 12px;
+  padding: 3px 8px;
   background: #2196f3;
   border: none;
   border-radius: 4px;
   color: white;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   transition: background 0.3s;
 }
 
 .search-btn:hover {
   background: #1976d2;
+}
+
+.fetch-latest-wrapper {
+  display: flex;
+  align-items: center;
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-label.disabled-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.checkbox-label.disabled-label input {
+  cursor: not-allowed;
+}
+
+.checkbox-label input {
+  cursor: pointer;
 }
 
 .period-section {
@@ -1538,13 +1951,13 @@ onMounted(async () => {
 }
 
 .period-btn {
-  padding: 4px 10px;
+  padding: 2px 6px;
   background: #333;
   border: 1px solid #444;
   border-radius: 4px;
   color: #999;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 10px;
   transition: all 0.3s;
 }
 
@@ -1566,13 +1979,13 @@ onMounted(async () => {
 }
 
 .zoom-btn {
-  padding: 4px 8px;
+  padding: 2px 5px;
   background: #2a2a2a;
   border: 1px solid #444;
   border-radius: 4px;
   color: #999;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   transition: all 0.3s;
 }
 
@@ -1584,9 +1997,9 @@ onMounted(async () => {
 
 .info-section {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   margin-left: auto;
-  font-size: 10px;
+  font-size: 9px;
   flex-wrap: nowrap;
   align-items: center;
   flex-shrink: 0;
@@ -1603,14 +2016,14 @@ onMounted(async () => {
 
 .info-label {
   color: #777;
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .info-value {
   color: #e0e0e0;
   font-weight: 600;
   line-height: 1;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .info-value.code {

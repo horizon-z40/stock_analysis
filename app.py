@@ -214,15 +214,15 @@ def fetch_latest_stock_data_from_ak(stock_code, start_date="20250329", end_date=
         print(f"正在从 akshare 抓取 {stock_code} 的数据，从 {formatted_start} 到 {formatted_end}")
         
         if suffix == 'HK':
-            df = ak.stock_hk_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+            df = ak.stock_hk_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="qfq")
         elif suffix == 'US':
             # 美股接口 symbol 需要带市场标识，如 105.AAPL
-            df = ak.stock_us_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+            df = ak.stock_us_hist(symbol=code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="qfq")
         else:
             # A 股
             # A 股接口 symbol 只需要 6 位代码
             pure_code = code.split('.')[0]
-            df = ak.stock_zh_a_hist(symbol=pure_code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="")
+            df = ak.stock_zh_a_hist(symbol=pure_code, period="daily", start_date=formatted_start, end_date=formatted_end, adjust="qfq")
         
         if df is None or df.empty:
             print(f"未获取到 {stock_code} 在该时间段的数据")
@@ -423,11 +423,12 @@ def get_stock_info(stock_code):
     """
     通过东财接口获取股票基础信息（公司名称、总市值、市盈率、市净率）
     """
+    suffix = stock_code.split('.')[-1].upper()
     secid = normalize_stock_code_with_market(stock_code)
     url = 'https://push2.eastmoney.com/api/qt/stock/get'
     params = {
         'secid': secid,
-        'fields': 'f43,f57,f58,f59,f116,f162,f163,f167'  # f43最新价, f59价格精度, f57代码, f58名称, f116总市值, f162市盈率(TTM), f163市盈率(静), f167是市净率(PB)
+        'fields': 'f43,f57,f58,f59,f116,f162,f163,f164,f167'  # f43最新价, f59价格精度, f57代码, f58名称, f116总市值, f162市盈率(TTM-A股), f163市盈率(静), f164市盈率(TTM-港美股), f167是市净率(PB)
     }
 
     try:
@@ -465,13 +466,22 @@ def get_stock_info(stock_code):
         # 获取价格精度，默认为 2
         price_precision = data.get('f59', 2)
         
+        # 针对不同市场选择 PE-TTM 字段
+        # A股通常用 f162, 港美股通常用 f164
+        pe_ttm_val = data.get('f162')
+        if suffix in ['HK', 'US'] or (safe_float(pe_ttm_val) or 0) < 0.1:
+            # 如果是港美股，或者 f162 异常小（接近0），则尝试使用 f164
+            alt_pe = data.get('f164')
+            if alt_pe and alt_pe != '-':
+                pe_ttm_val = alt_pe
+
         result = {
             'success': True,
             'stock_code': data.get('f57') or stock_code,
             'name': data.get('f58'),
             'price': safe_div_precision(data.get('f43'), price_precision),
             'market_cap': safe_float(data.get('f116')),  # 总市值（元）
-            'pe_ttm': safe_div_100(data.get('f162')),
+            'pe_ttm': safe_div_100(pe_ttm_val),
             'pe_static': safe_div_100(data.get('f163')),
             'pb': safe_div_100(data.get('f167')),
         }
@@ -491,7 +501,13 @@ def get_stock_pe_history(stock_code):
     parts = stock_code.split('.')
     suffix = parts[-1].upper()
     
-    if suffix in ['US', 'SZ', 'SH', 'HK']:
+    if suffix == 'US':
+        # 美股代码格式可能是 "105.AAPL.US"，API 只需要 "AAPL"
+        if len(parts) >= 3:
+            code = parts[1]
+        else:
+            code = parts[0]
+    elif suffix in ['SZ', 'SH', 'HK']:
         code = ".".join(parts[:-1])
     else:
         code = stock_code
